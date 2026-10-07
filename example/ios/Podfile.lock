@@ -3,6 +3,11 @@ PODS:
     - Flutter
   - device_info_plus (0.0.1):
     - Flutter
+  - ffmpeg_kit_flutter_new_video (8.1.2):
+    - ffmpeg_kit_flutter_new_video/video (= 8.1.2)
+    - Flutter
+  - ffmpeg_kit_flutter_new_video/video (8.1.2):
+    - Flutter
   - Flutter (1.0.0)
   - get_thumbnail_video (0.0.1):
     - Flutter
@@ -42,6 +47,8 @@ PODS:
 DEPENDENCIES:
   - deepar_flutter_plus (from `.symlinks/plugins/deepar_flutter_plus/ios`)
   - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
+  - easy_video_editor (from `.symlinks/plugins/easy_video_editor/ios`)
+  - ffmpeg_kit_flutter_new_video (from `.symlinks/plugins/ffmpeg_kit_flutter_new_video/ios`)
   - Flutter (from `Flutter`)
   - get_thumbnail_video (from `.symlinks/plugins/get_thumbnail_video/ios`)
   - google_maps_flutter_ios (from `.symlinks/plugins/google_maps_flutter_ios/ios`)
@@ -61,6 +68,10 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/deepar_flutter_plus/ios"
   device_info_plus:
     :path: ".symlinks/plugins/device_info_plus/ios"
+  easy_video_editor:
+    :path: ".symlinks/plugins/easy_video_editor/ios"
+  ffmpeg_kit_flutter_new_video:
+    :path: ".symlinks/plugins/ffmpeg_kit_flutter_new_video/ios"
   Flutter:
     :path: Flutter
   get_thumbnail_video:
@@ -77,8 +88,13 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/video_compress/ios"
 
 SPEC CHECKSUMS:
-  deepar_flutter_plus: 55902250f36c2f556a2ff319464d93dd6b24b0cf
-  device_info_plus: 97af1d7e84681a90d0693e63169a5d50e0839a0d
+  audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
+  audioplayers_darwin: 835ced6edd4c9fc8ebb0a7cc9e294a91d99917d5
+  camera_avfoundation: 5675ca25298b6f81fa0a325188e7df62cc217741
+  connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
+  device_info_plus: 71ffc6ab7634ade6267c7a93088ed7e4f74e5896
+  easy_video_editor: f84114d9beefb86acc193517725ea1e8161872c8
+  ffmpeg_kit_flutter_new_video: bb1b8320b8dc6c524d205f1875d3ff70aaf7d914
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   get_thumbnail_video: b9a180957daed3e9179e66268db51d8798e41f65
   Google-Maps-iOS-Utils: 66d6de12be1ce6d3742a54661e7a79cb317a9321
