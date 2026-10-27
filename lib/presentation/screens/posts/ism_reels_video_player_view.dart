@@ -3157,7 +3157,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       _isImagePaused = true;
       _imageViewTimer?.cancel();
       final key = _getCurrentVideoPlayerKey();
-      VideoPlayerWidget.of(key)?.pause();
+      VideoPlayerWidget.of(key)?.pauseForLifecycle();
       return;
     }
     if (!pausePlayback) {

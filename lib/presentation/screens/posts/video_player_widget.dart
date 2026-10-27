@@ -161,7 +161,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     IsrActiveVideoPlayerRegistry.registerPauseHandler(_backgroundPauseHandler);
     _isVisible = widget.visibilityManagedByParent
         ? _parentWantsVisible
-        : !widget.isPreloaded;
+        : !widget.isPreloaded && _parentWantsVisible;
     if (kDebugMode) {
       debugPrint(
         '⚠️ state VideoPlayerWidget: (${widget.logIndex}) initState - isPreloaded: ${widget.isPreloaded}',
@@ -428,12 +428,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       } else {
         debugPrint(
             '⚠️ VideoPlayerWidget: Failed to initialize video: ${widget.mediaUrl}');
-        // If visible, schedule a retry
-        if (_isVisible && mounted) {
+        // If this clip is still the one that should be on screen, retry.
+        if (_mayStartCurrentClip && mounted) {
           debugPrint(
               '🔄 VideoPlayerWidget: Scheduling retry for visible video...');
           Future.delayed(const Duration(seconds: 1), () {
-            if (!_isDisposed && _isVisible && !_isInitialized) {
+            if (!_isDisposed && _mayStartCurrentClip && !_isInitialized) {
               _isInitializing = false;
               _initializeVideoPlayer();
             }
@@ -442,11 +442,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       }
     } catch (e) {
       debugPrint('❌ VideoPlayerWidget: Error initializing video: $e');
-      // If visible, schedule a retry on error
-      if (_isVisible && mounted) {
+      // If this clip is still the one that should be on screen, retry.
+      if (_mayStartCurrentClip && mounted) {
         debugPrint('🔄 VideoPlayerWidget: Scheduling retry after error...');
         Future.delayed(const Duration(seconds: 2), () {
-          if (!_isDisposed && _isVisible && !_isInitialized) {
+          if (!_isDisposed && _mayStartCurrentClip && !_isInitialized) {
             _isInitializing = false;
             _initializeVideoPlayer();
           }
@@ -491,15 +491,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       ]);
       await _applyPendingSeek();
 
-      // If widget is visible when initialized, start playing immediately
-      if (_isVisible) {
-        // Don't await play - let it start immediately
+      // Re-read the tab/host gate. The clip may have been covered while precache
+      // was in flight, and [_isVisible] can still be the value from initState.
+      if (_mayStartCurrentClip) {
+        _pendingBlocResume = false;
         unawaited(_videoPlayerController!.play());
         widget.videoCacheManager.markAsVisible(widget.mediaUrl);
-        // Start stuck video detection to handle videos that don't start
         _startStuckVideoDetection();
       } else {
+        if (_videoPlayerController!.isPlaying) {
+          unawaited(_videoPlayerController!.pause());
+        }
         widget.videoCacheManager.markAsNotVisible(widget.mediaUrl);
+        _stopStuckVideoDetection();
       }
     } catch (e) {
       debugPrint('❌ VideoPlayerWidget: Error setting up controller: $e');
@@ -651,21 +655,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       return;
     }
 
+    if (!_feedAllowsPlayback) {
+      _rejectPlaybackWhileFeedBlocked();
+      return;
+    }
+
     if (info.visibleFraction > 0.55) {
       _warmPlaybackAnchored = true;
     } else if (widget.holdWarmPlayback &&
         !_warmPlaybackAnchored &&
         _videoPlayerController?.isPlaying == true) {
-      return;
-    }
-
-    if (!_feedAllowsPlayback) {
-      if (_videoPlayerController != null &&
-          _videoPlayerController!.isInitialized &&
-          !_videoPlayerController!.isDisposed &&
-          _videoPlayerController!.isPlaying) {
-        unawaited(_videoPlayerController!.pause());
-      }
       return;
     }
 
@@ -682,11 +681,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       widget.onVisibilityChanged(_isVisible);
     }
 
-    if (_pendingBlocResume &&
-        !_isManuallyPaused &&
-        _mayStartPlayback(activeReel: true)) {
-      _pendingBlocResume = false;
-      play();
+    if (_pendingBlocResume && !_isManuallyPaused && _isVisible) {
+      _tryStartPlaybackNow();
     }
 
     // Control playback based on visibility (only if not manually paused)
@@ -696,7 +692,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         _videoPlayerController!.isInitialized &&
         !_videoPlayerController!.isDisposed) {
       try {
-        if (_isVisible &&
+        if (_mayStartPlayback() &&
             !_videoPlayerController!.isPlaying &&
             !_isManuallyPaused) {
           // Ensure volume is set correctly before playing
@@ -718,7 +714,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         debugPrint(
             '⚠️ VideoPlayerWidget: Error in visibility change handler: $e');
       }
-    } else if (_isVisible) {
+    } else if (_isVisible && _parentWantsVisible) {
       // OPTIMIZATION: If visible but not initialized/initializing, start initialization immediately
       if (!_isInitializing && !_isInitialized) {
         debugPrint(
@@ -740,7 +736,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
     // First check after 300ms (catch early stuck videos faster)
     Future.delayed(const Duration(milliseconds: 300), () {
-      if (!_isDisposed && _isVisible) {
+      if (!_isDisposed && _mayStartCurrentClip) {
         _checkAndRecoverStuckVideo();
       }
     });
@@ -759,9 +755,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   /// Check if video is stuck and try to recover
   void _checkAndRecoverStuckVideo() {
-    if (_isDisposed ||
-        !_mayStartPlayback(activeReel: true) ||
-        _isManuallyPaused) {
+    if (_isDisposed || !_mayStartCurrentClip || _isManuallyPaused) {
       _stopStuckVideoDetection();
       return;
     }
@@ -792,7 +786,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         debugPrint('✅ Video started playing after $_recoveryAttempts attempts');
         _stopStuckVideoDetection();
       }
-    } else if (!_isInitializing && _isVisible) {
+    } else if (!_isInitializing && _mayStartCurrentClip) {
       // Controller is not ready but video is visible - try to initialize
       debugPrint('🔄 Controller not ready, reinitializing...');
       _reinitializeVideo();
@@ -801,7 +795,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   /// Re-initialize video when stuck
   Future<void> _reinitializeVideo() async {
-    if (_isDisposed || !_isVisible) return;
+    if (_isDisposed || !_mayStartCurrentClip) return;
 
     debugPrint('🔄 Re-initializing video: ${widget.mediaUrl}');
 
@@ -815,7 +809,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // Small delay before reinitializing
     await Future.delayed(const Duration(milliseconds: 100));
 
-    if (!_isDisposed && _isVisible) {
+    if (!_isDisposed && _mayStartCurrentClip) {
       await _initializeVideoPlayer();
     }
   }
@@ -905,6 +899,26 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       (widget.isParentVisible?.call() ?? true) &&
       IsrVideoReelConfig.allowsPlayback;
 
+  /// Current on-screen clip, including full-screen reels whose
+  /// [VisibilityDetector] sample has not arrived yet.
+  ///
+  /// Preloaded neighbors and covered tabs stay false, so a precache that
+  /// finishes after a tab switch cannot start audio.
+  bool get _mayStartCurrentClip => _mayStartPlayback(
+        activeReel: !widget.isPreloaded && !widget.visibilityManagedByParent,
+      );
+
+  void _rejectPlaybackWhileFeedBlocked() {
+    final wasVisible = _isVisible;
+    _isVisible = false;
+    if (wasVisible != _isVisible) {
+      widget.onVisibilityChanged(false);
+    }
+    _pauseControllerIfPlaying();
+    widget.videoCacheManager.markAsNotVisible(widget.mediaUrl);
+    _stopStuckVideoDetection();
+  }
+
   /// Whether this player may start/resume right now.
   ///
   /// Parent-managed players (feed carousel) always follow [_effectiveVisible].
@@ -925,23 +939,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     if (_isDisposed || widget.releaseSurface) return;
 
     _isManuallyPaused = false;
-    _pendingBlocResume = false;
-    // Safety check: ensure controller is valid and not disposed
-    if (_videoPlayerController != null &&
-        _videoPlayerController!.isInitialized &&
-        !_videoPlayerController!.isDisposed &&
-        !_videoPlayerController!.isPlaying) {
-      final shouldPlay = widget.visibilityManagedByParent
-          ? _effectiveVisible
-          : _mayStartPlayback();
-      if (shouldPlay) {
-        unawaited(
-          _videoPlayerController!.setVolume(widget.isMuted ? 0.0 : 1.0),
-        );
-        unawaited(_videoPlayerController!.play());
-      }
-      _logVideoStartedEvent();
-    }
+    if (_tryStartPlaybackNow()) return;
+
+    // Controller is not ready, or the tab/host is not the one on screen.
+    // Keep the resume so a later visibility sample can start the clip.
+    _pendingBlocResume = true;
     _notifyPlaybackStateChanged();
   }
 
@@ -1091,7 +1093,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     if (oldWidget.isPreloaded &&
         !widget.isPreloaded &&
         !widget.visibilityManagedByParent) {
-      _isVisible = true;
+      _isVisible = _parentWantsVisible;
+      if (!_parentWantsVisible) return;
       if (_isInitialized) {
         forceResume(activeReel: true);
       } else {

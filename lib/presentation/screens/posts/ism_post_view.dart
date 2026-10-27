@@ -693,6 +693,11 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     );
   }
 
+  String _lazyTabSlotKey(int index) {
+    final tab = _tabDataModelList[index].tabDataModel;
+    return 'reels_tab_slot_${tab.postSectionType.name}_$index';
+  }
+
   Widget _buildLazyTabStack() {
     _materializedTabIndices.add(_currentIndex);
     final indices = _materializedTabIndices.toList()..sort();
@@ -701,6 +706,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       children: [
         for (final index in indices)
           Offstage(
+            key: ValueKey(_lazyTabSlotKey(index)),
             offstage: index != _currentIndex,
             child: TickerMode(
               enabled: index == _currentIndex,
@@ -717,12 +723,16 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
         key: Key(
             'reels_tab_${tab.tabDataModel.title}_${tab.tabDataModel.postSectionType.name}_${tab.tabDataModel.tagValue}_${tab.tabDataModel.userId}_${tab.tabDataModel.postId}_'),
         onVisibilityChanged: (VisibilityInfo info) {
+          if (!mounted) return;
           final tabIndex = _tabDataModelList.indexOf(tab);
-          if (tabIndex != _currentIndex) {
-            tab.isVisible = false;
-            return;
-          }
-          tab.isVisible = info.visibleFraction >= 0.85;
+          final nextVisible =
+              tabIndex == _currentIndex && info.visibleFraction >= 0.85;
+          if (tab.isVisible == nextVisible) return;
+          tab.isVisible = nextVisible;
+          // Players read isTabVisible live. A flag write alone leaves a clip
+          // paused after the tab becomes the one on screen, or playing after
+          // it is covered.
+          VisibilityDetectorController.instance.notifyNow();
         },
         child: BlocBuilder<SocialPostBloc, SocialPostState>(
             buildWhen: (previousState, currentState) =>
