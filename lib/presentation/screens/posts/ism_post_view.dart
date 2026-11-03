@@ -56,7 +56,7 @@ class IsmPostView extends StatefulWidget {
 }
 
 class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
-  TabController? _postTabController;
+  _LoginGatedTabController? _postTabController;
   late List<RefreshController> _refreshControllers;
   var _currentIndex = 1;
   var _loggedInUserId = '';
@@ -104,7 +104,8 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   AnimationStatusListener? _routeEnterStatusListener;
   var _initialPostLoadDispatched = false;
   var _initialCommentOpenAttempted = false;
-  var _tabChangeRequestId = 0;
+  var _gatedTabRequestId = 0;
+  Completer<void>? _loginFlow;
   final Set<int> _materializedTabIndices = <int>{};
 
   /// Prevents stacked pagination API calls when the user swipes past the
@@ -187,11 +188,14 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       Utility.showToastMessage('sdk not initialized');
       return;
     }
-    // Initialize TabController with initialIndex = _currentIndex
-    _postTabController = TabController(
+    // Initialize TabController with initialIndex = _currentIndex.
+    // User-dependent taps are held here until login succeeds.
+    _postTabController = _LoginGatedTabController(
       length: _tabDataModelList.length,
       vsync: this,
       initialIndex: _currentIndex,
+      isUserDependentIndex: _isUserDependentTab,
+      onBlockedTap: _onGatedTabTap,
     );
 
     _refreshControllers =
@@ -204,7 +208,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     }
     _scheduleReelsBodyWhenRouteSettled();
     _loggedInUserId = await _socialPostBloc.userId;
-    _postTabController?.addListener(() async {
+    _postTabController?.addListener(() {
       if (!mounted) return;
       final controller = _postTabController;
       if (controller == null || controller.indexIsChanging) return;
@@ -212,46 +216,104 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       final newIndex = controller.index;
       if (newIndex < 0 || newIndex >= _tabDataModelList.length) return;
       final lastIndex = _currentIndex;
-      if (_currentIndex != newIndex) {
-        final requestId = ++_tabChangeRequestId;
-        _currentIndex = newIndex;
-        _materializedTabIndices.add(newIndex);
-        final tabData = _tabDataModelList[newIndex];
-        if (tabData.tabDataModel.postSectionType.isUserDependent) {
-          var isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
-          if (!mounted || requestId != _tabChangeRequestId) return;
-          if (!isUserLoggedIn) {
-            await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
-            isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
-            if (!mounted || requestId != _tabChangeRequestId) return;
-          }
-          if (!isUserLoggedIn) {
-            _currentIndex = lastIndex;
-            final safeIndex = lastIndex.clamp(0, _tabDataModelList.length - 1);
-            if ((_postTabController?.index ?? safeIndex) != safeIndex) {
-              _postTabController?.animateTo(safeIndex);
-            }
-            return;
-          }
-        }
-        _currentPostSectionType = tabData.tabDataModel.postSectionType;
-        _tabConfig.tabCallBackConfig?.onChangeOfTab?.call(tabData.tabDataModel);
-        // Handle tab change if we have a user
-        if (_loggedInUserId.isNotEmpty) {
-          try {
-            _videoCacheManager = VideoCacheManager();
-          } catch (e) {
-            debugPrint('Error during tab change: $e');
-          }
-        }
-        if (!mounted || requestId != _tabChangeRequestId) return;
-        _handoffTabPlayback(lastIndex: lastIndex, newIndex: newIndex);
-        setState(() {});
-        if (tabData.tabDataModel.reelsDataList.isEmpty) {
-          _requestHomeTabLoad(tabData);
+      if (_currentIndex == newIndex) return;
+      _currentIndex = newIndex;
+      _materializedTabIndices.add(newIndex);
+      final tabData = _tabDataModelList[newIndex];
+      _currentPostSectionType = tabData.tabDataModel.postSectionType;
+      _tabConfig.tabCallBackConfig?.onChangeOfTab?.call(tabData.tabDataModel);
+      // Handle tab change if we have a user
+      if (_loggedInUserId.isNotEmpty) {
+        try {
+          _videoCacheManager = VideoCacheManager();
+        } catch (e) {
+          debugPrint('Error during tab change: $e');
         }
       }
+      if (!mounted) return;
+      _handoffTabPlayback(lastIndex: lastIndex, newIndex: newIndex);
+      setState(() {});
+      if (tabData.tabDataModel.reelsDataList.isEmpty) {
+        _requestHomeTabLoad(tabData);
+      }
     });
+  }
+
+  bool _isUserDependentTab(int index) {
+    if (index < 0 || index >= _tabDataModelList.length) return false;
+    return _tabDataModelList[index]
+        .tabDataModel
+        .postSectionType
+        .isUserDependent;
+  }
+
+  /// Holds the current tab, then moves only if the user is logged in.
+  void _onGatedTabTap(int index) {
+    final controller = _postTabController;
+    if (!mounted || controller == null) return;
+    if (index < 0 || index >= _tabDataModelList.length) return;
+    if (index == controller.index) return;
+
+    final requestId = ++_gatedTabRequestId;
+    final originIndex = controller.index;
+    unawaited(
+      _switchToUserDependentTab(
+        index: index,
+        requestId: requestId,
+        originIndex: originIndex,
+      ),
+    );
+  }
+
+  Future<void> _switchToUserDependentTab({
+    required int index,
+    required int requestId,
+    required int originIndex,
+  }) async {
+    var isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
+    if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+    if (!isUserLoggedIn) {
+      await _awaitLoginFlow();
+      if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+      isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
+      if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+    }
+    if (!isUserLoggedIn) return;
+
+    final controller = _postTabController;
+    if (controller == null || controller.index == index) return;
+    controller.animateToAllowed(index);
+  }
+
+  /// Shares one login sheet if several gated taps overlap.
+  Future<void> _awaitLoginFlow() {
+    final inFlight = _loginFlow;
+    if (inFlight != null) return inFlight.future;
+
+    final completer = Completer<void>();
+    _loginFlow = completer;
+    unawaited(_runLoginFlow(completer));
+    return completer.future;
+  }
+
+  Future<void> _runLoginFlow(Completer<void> completer) async {
+    try {
+      await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
+    } catch (e) {
+      debugPrint('ism_post_view: login flow failed: $e');
+    } finally {
+      if (identical(_loginFlow, completer)) {
+        _loginFlow = null;
+      }
+      if (!completer.isCompleted) completer.complete();
+    }
+  }
+
+  bool _isGatedTabRequestCurrent(int requestId, int originIndex) {
+    if (!mounted || requestId != _gatedTabRequestId) return false;
+    final controller = _postTabController;
+    if (controller == null) return false;
+    return controller.index == originIndex;
   }
 
   /// Stops image/sound bleed from a kept-alive offstage tab (e.g. Feed → Following).
@@ -2062,5 +2124,44 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       isDismissible: true,
     );
     return updatedSaveStatus != isSavedPost;
+  }
+}
+
+/// Keeps [TabBar] from moving onto a user-dependent tab before login.
+class _LoginGatedTabController extends TabController {
+  _LoginGatedTabController({
+    required super.length,
+    required super.vsync,
+    super.initialIndex,
+    required this.isUserDependentIndex,
+    required this.onBlockedTap,
+  });
+
+  final bool Function(int index) isUserDependentIndex;
+  final void Function(int index) onBlockedTap;
+  var _bypassGate = false;
+
+  /// Index change after login has already been confirmed.
+  void animateToAllowed(
+    int value, {
+    Duration? duration,
+    Curve curve = Curves.ease,
+  }) {
+    _bypassGate = true;
+    animateTo(value, duration: duration, curve: curve);
+    _bypassGate = false;
+  }
+
+  @override
+  void animateTo(
+    int value, {
+    Duration? duration,
+    Curve curve = Curves.ease,
+  }) {
+    if (!_bypassGate && value != index && isUserDependentIndex(value)) {
+      onBlockedTap(value);
+      return;
+    }
+    super.animateTo(value, duration: duration, curve: curve);
   }
 }
