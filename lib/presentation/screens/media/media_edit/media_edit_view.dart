@@ -5,14 +5,16 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_thumbnail_video/index.dart' show ImageFormat;
 import 'package:ism_video_reel_player/presentation/presentation.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/media_edit_config.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_audio_model.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_models.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_media_editor/pro_image_editor_wrapper.dart';
-import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_media_editor/pro_video_editor_wrapper.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/widgets/media_edit_widgets.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_add/video_add_draft.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_add/video_add_screen.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_filter/video_filter_draft.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_filter/video_filter_screen.dart';
 import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:path_provider/path_provider.dart';
@@ -80,7 +82,7 @@ class _MediaEditViewState extends State<MediaEditView> {
         final thumbPath = await MediaUtil.generateThumbnail(
           video: mediaPath,
           thumbnailPath: tempDir.path,
-          imageFormat: ImageFormat.JPEG,
+          imageFormat: VideoThumbnailFormat.jpeg,
           quality: 70,
           timeMs: 1500,
         );
@@ -245,70 +247,61 @@ class _MediaEditViewState extends State<MediaEditView> {
     }
   }
 
-  Future<void> _navigateToVideoTrim(MediaEditLoadedState state) async {
+  Future<void> _navigateToVideoFilter(MediaEditLoadedState state) async {
     final currentItem = state.mediaEditItems[state.currentIndex];
-
-    // Push your editor widget directly
-    final result = await Navigator.push<Map<String, dynamic>>(
+    final source = currentItem.filterInputPath ??
+        currentItem.editedPath ??
+        currentItem.originalPath;
+    final saved = await Navigator.push<VideoFilterExport>(
       context,
       MaterialPageRoute(
-        builder: (context) => ProVideoEditorWrapper(
-          mediaPath: currentItem.editedPath ?? currentItem.originalPath,
-          mediaEditConfig: widget.mediaEditConfig,
-          title: 'Video Trim Editor',
-          filename: 'trimmed_video.mp4',
-          editingMode: 'Trim',
-          // Specify editing mode
-          saveLocally: false,
+        builder: (context) => VideoFilterScreen(
+          videoPath: source,
+          initial: currentItem.filterSettings ?? VideoFilterDraft.neutral,
         ),
       ),
     );
+    if (!mounted || saved == null) return;
+    _bloc.add(NavigateToVideoFilterEvent(export: saved));
+  }
 
-    _bloc.add(NavigateToVideoTrimEvent(result: result));
+  Future<void> _navigateToVideoAdd(MediaEditLoadedState state) async {
+    final currentItem = state.mediaEditItems[state.currentIndex];
+    final source = currentItem.addInputPath ??
+        currentItem.editedPath ??
+        currentItem.originalPath;
+    final saved = await Navigator.push<VideoAddExport>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => VideoAddScreen(
+          videoPath: source,
+          stickerAssetPaths: widget
+              .mediaEditConfig.mediaEditorStickersConfig.stickerAssetPaths,
+          initial: currentItem.addDraft ?? VideoAddDraft.empty,
+        ),
+      ),
+    );
+    if (!mounted || saved == null) return;
+    _bloc.add(NavigateToVideoAddEvent(export: saved));
   }
 
   Future<void> _navigateToVideoEdit(MediaEditLoadedState state) async {
     final currentItem = state.mediaEditItems[state.currentIndex];
-
-    // Push your editor widget directly
-    final result = await Navigator.push<Map<String, dynamic>>(
+    final output = await GalleryVideoTrimUtil.trimVideo(
       context,
-      MaterialPageRoute(
-        builder: (context) => ProVideoEditorWrapper(
-          mediaPath: currentItem.editedPath ?? currentItem.originalPath,
-          mediaEditConfig: widget.mediaEditConfig,
-          title: 'Video Editor',
-          filename: 'filtered_video.mp4',
-          editingMode: 'edit',
-          // Specify editing mode
-          saveLocally: false,
-        ),
+      videoPath: currentItem.editedPath ?? currentItem.originalPath,
+      forceTrimUi: true,
+      outputFilename: 'media_edit_video.mp4',
+    );
+    if (!mounted || output == null) return;
+    _bloc.add(
+      NavigateToVideoEditEvent(
+        result: {
+          'success': true,
+          'file': File(output),
+        },
       ),
     );
-
-    _bloc.add(NavigateToVideoEditEvent(result: result));
-  }
-
-  Future<void> _navigateToVideoFilter(MediaEditLoadedState state) async {
-    final currentItem = state.mediaEditItems[state.currentIndex];
-
-    // Push your editor widget directly
-    final result = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ProVideoEditorWrapper(
-          mediaPath: currentItem.editedPath ?? currentItem.originalPath,
-          mediaEditConfig: widget.mediaEditConfig,
-          title: 'Video Filter Editor',
-          filename: 'filtered_video.mp4',
-          editingMode: 'filter',
-          // Specify editing mode
-          saveLocally: false,
-        ),
-      ),
-    );
-
-    _bloc.add(NavigateToVideoFilterEvent(result: result));
   }
 
   Future<void> _handleMediaEditComplete(List<MediaEditItem> mediaEditItems) async {
@@ -543,7 +536,7 @@ class _MediaEditViewState extends State<MediaEditView> {
     List<Widget> buttons;
 
     if (isVideo) {
-      // Video buttons: Audio, Filter, Trim, Cover Photo
+      // Video buttons: Audio, Filter, Add, Edit
       buttons = [
         if (widget.onSelectSound != null)
           _buildSectionButton(
@@ -552,14 +545,14 @@ class _MediaEditViewState extends State<MediaEditView> {
             onTap: () => _navigateToAudioEditor(state),
           ),
         _buildSectionButton(
-          icon: Icons.content_cut,
-          label: 'Trim',
-          onTap: () => _navigateToVideoTrim(state),
-        ),
-        _buildSectionButton(
           icon: Icons.auto_awesome,
           label: 'Filter',
           onTap: () => _navigateToVideoFilter(state),
+        ),
+        _buildSectionButton(
+          icon: Icons.add_reaction_outlined,
+          label: 'Add',
+          onTap: () => _navigateToVideoAdd(state),
         ),
         _buildSectionButton(
           icon: Icons.tune,

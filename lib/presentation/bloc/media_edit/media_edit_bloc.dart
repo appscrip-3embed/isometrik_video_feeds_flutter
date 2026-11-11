@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_audio_model.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_models.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_add/video_add_draft.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/video_editor/video_filter/video_filter_draft.dart';
 import 'package:ism_video_reel_player/utils/post_sound_util.dart';
 import 'package:ism_video_reel_player/utils/utility.dart';
 
@@ -25,6 +27,7 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     on<NavigateToVideoTrimEvent>(_onNavigateToVideoTrim);
     on<NavigateToVideoEditEvent>(_onNavigateToVideoEdit);
     on<NavigateToVideoFilterEvent>(_onNavigateToVideoFilter);
+    on<NavigateToVideoAddEvent>(_onNavigateToVideoAdd);
     on<NavigateToCoverPhotoEvent>(_onNavigateToCoverPhoto);
     on<ProceedToNextEvent>(_onProceedToNext);
   }
@@ -179,6 +182,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: editedFile.path,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -207,6 +214,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: editedFile.path,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -235,6 +246,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: editedFile.path,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -277,6 +292,8 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
       item = item.copyWith(
         editedPath: muxed,
         sound: sound,
+        clearFilter: muxed != videoPath,
+        clearAdd: muxed != videoPath,
       );
     } else {
       item = item.copyWith(sound: sound);
@@ -307,6 +324,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: currentItem.thumbnailPath,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -335,6 +356,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: currentItem.thumbnailPath,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -349,6 +374,40 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     NavigateToVideoFilterEvent event,
     Emitter<MediaEditState> emit,
   ) async {
+    if (event.export != null && _currentIndex < _mediaEditItems.length) {
+      final currentItem = _mediaEditItems[_currentIndex];
+      final export = event.export!;
+      _mediaEditItems[_currentIndex] = MediaEditItem(
+        originalPath: currentItem.originalPath,
+        editedPath: export.outputPath,
+        mediaType: currentItem.mediaType,
+        width: currentItem.width,
+        height: currentItem.height,
+        duration: currentItem.duration,
+        thumbnailPath: currentItem.thumbnailPath,
+        sound: currentItem.sound,
+        metaData: currentItem.metaData,
+        filterSettings: export.baked ? export.settings : null,
+        filterInputPath: export.baked ? export.inputPath : null,
+        addDraft: export.baked ? null : currentItem.addDraft,
+        addInputPath: export.baked ? null : currentItem.addInputPath,
+      );
+      emit(MediaEditLoadedState(
+        mediaEditItems: List.from(_mediaEditItems),
+        currentIndex: _currentIndex,
+      ));
+      return;
+    }
+    if (event.settings != null && _currentIndex < _mediaEditItems.length) {
+      final currentItem = _mediaEditItems[_currentIndex];
+      _mediaEditItems[_currentIndex] =
+          currentItem.copyWith(filterSettings: event.settings);
+      emit(MediaEditLoadedState(
+        mediaEditItems: List.from(_mediaEditItems),
+        currentIndex: _currentIndex,
+      ));
+      return;
+    }
     if (event.result != null && event.result!['success'] == true) {
       final editedFile = event.result!['file'] as File?;
       if (editedFile != null && _currentIndex < _mediaEditItems.length) {
@@ -363,6 +422,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           thumbnailPath: currentItem.thumbnailPath,
           sound: currentItem.sound,
           metaData: currentItem.metaData,
+          filterSettings: null,
+          filterInputPath: null,
+          addDraft: null,
+          addInputPath: null,
         );
         _mediaEditItems[_currentIndex] = updatedItem;
         emit(MediaEditLoadedState(
@@ -371,6 +434,32 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
         ));
       }
     }
+  }
+
+  Future<void> _onNavigateToVideoAdd(
+    NavigateToVideoAddEvent event,
+    Emitter<MediaEditState> emit,
+  ) async {
+    if (_currentIndex >= _mediaEditItems.length) return;
+    final currentItem = _mediaEditItems[_currentIndex];
+    final export = event.export;
+    _mediaEditItems[_currentIndex] = MediaEditItem(
+      originalPath: currentItem.originalPath,
+      editedPath: export.outputPath,
+      mediaType: currentItem.mediaType,
+      width: currentItem.width,
+      height: currentItem.height,
+      duration: currentItem.duration,
+      thumbnailPath: currentItem.thumbnailPath,
+      sound: currentItem.sound,
+      metaData: currentItem.metaData,
+      addDraft: export.draft,
+      addInputPath: export.inputPath,
+    );
+    emit(MediaEditLoadedState(
+      mediaEditItems: List.from(_mediaEditItems),
+      currentIndex: _currentIndex,
+    ));
   }
 
   Future<void> _onNavigateToCoverPhoto(
@@ -389,6 +478,10 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
         thumbnailPath: event.coverFile!.path,
         sound: currentItem.sound,
         metaData: currentItem.metaData,
+        filterSettings: currentItem.filterSettings,
+        filterInputPath: currentItem.filterInputPath,
+        addDraft: currentItem.addDraft,
+        addInputPath: currentItem.addInputPath,
       );
       _mediaEditItems[_currentIndex] = updatedItem;
       emit(MediaEditLoadedState(

@@ -85,9 +85,17 @@ class NavigateToVideoEditEvent extends MediaEditEvent {
 }
 
 class NavigateToVideoFilterEvent extends MediaEditEvent {
-  NavigateToVideoFilterEvent({required this.result});
+  NavigateToVideoFilterEvent({this.result, this.settings, this.export});
 
+  final VideoFilterExport? export;
   final Map<String, dynamic>? result;
+  final VideoFilterDraft? settings;
+}
+
+class NavigateToVideoAddEvent extends MediaEditEvent {
+  NavigateToVideoAddEvent({required this.export});
+
+  final VideoAddExport export;
 }
 
 class NavigateToCoverPhotoEvent extends MediaEditEvent {
