@@ -27,6 +27,8 @@ abstract final class CreatePostFlowCoordinator {
     MediaEditSoundItem? initialSound,
     TransitionType? transitionType,
   }) async {
+    if (!await IsrAppNavigator.ensureCanCreateContent()) return null;
+    if (!context.mounted) return null;
     // Drop keep-alive reel decoders before DeepAR/camera — stacked natives are
     // the main create-post memory spike (~1GB on iOS).
     await IsrVideoReelConfig.releaseFeedDecodersForHeavyOverlay();
@@ -241,23 +243,32 @@ abstract final class CreatePostFlowCoordinator {
     int? imageMediaLimit,
     int? videoMediaLimit,
     int? mediaLimit,
-  }) =>
-      ms.MediaSelectionConfig(
-        isMultiSelect: isMultiSelect ?? true,
-        imageMediaLimit: imageMediaLimit ?? IsrAppConstants.imageMediaLimit,
-        videoMediaLimit: videoMediaLimit ?? IsrAppConstants.videoMediaLimit,
-        mediaLimit: mediaLimit ?? IsrAppConstants.totalMediaLimit,
-        singleSelectModeIcon: const AppImage.svg(AssetConstants.icMediaSelectSingle),
-        multiSelectModeIcon: const AppImage.svg(AssetConstants.icMediaSelectMultiple),
-        doneButtonText: doneButtonText ?? IsrTranslationFile.next,
-        selectMediaTitle: selectMediaTitle ?? IsrTranslationFile.newReel,
-        primaryColor: IsrColors.appColor,
-        primaryTextColor: IsrColors.primaryTextColor,
-        backgroundColor: Colors.white,
-        appBarColor: Colors.white,
-        primaryFontFamily: IsrAppConstants.primaryFontFamily,
-        mediaListType: mediaListType ?? ms.MediaListType.imageVideo,
-      );
+  }) {
+    final textColor = IsrColors.primaryTextColor;
+    return ms.MediaSelectionConfig(
+      isMultiSelect: isMultiSelect ?? true,
+      imageMediaLimit: imageMediaLimit ?? IsrAppConstants.imageMediaLimit,
+      videoMediaLimit: videoMediaLimit ?? IsrAppConstants.videoMediaLimit,
+      mediaLimit: mediaLimit ?? IsrAppConstants.totalMediaLimit,
+      closeIcon: ms.MediaSelectionConstant.closeIcon(color: textColor),
+      singleSelectModeIcon: AppImage.svg(
+        AssetConstants.icMediaSelectSingle,
+        color: textColor,
+      ),
+      multiSelectModeIcon: AppImage.svg(
+        AssetConstants.icMediaSelectMultiple,
+        color: textColor,
+      ),
+      doneButtonText: doneButtonText ?? IsrTranslationFile.next,
+      selectMediaTitle: selectMediaTitle ?? IsrTranslationFile.newReel,
+      primaryColor: IsrColors.appColor,
+      primaryTextColor: textColor,
+      backgroundColor: IsrColors.scaffoldColor,
+      appBarColor: IsrColors.appBarColor,
+      primaryFontFamily: IsrAppConstants.primaryFontFamily,
+      mediaListType: mediaListType ?? ms.MediaListType.imageVideo,
+    );
+  }
 
   /// Host [CreateEditPostUIConfig.mediaSelectionConfig] when set, otherwise
   /// [defaultMediaSelectionConfig] with optional overrides.

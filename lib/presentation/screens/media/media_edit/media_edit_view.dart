@@ -14,6 +14,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_media_editor/pro_video_editor_wrapper.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/widgets/media_edit_widgets.dart';
 import 'package:ism_video_reel_player/res/res.dart';
+import 'package:ism_video_reel_player/utils/isr_image_sound_registry.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:reorderables/reorderables.dart';
@@ -42,7 +43,8 @@ class MediaEditView extends StatefulWidget {
   State<MediaEditView> createState() => _MediaEditViewState();
 }
 
-class _MediaEditViewState extends State<MediaEditView> {
+class _MediaEditViewState extends State<MediaEditView>
+    with WidgetsBindingObserver {
   late final MediaEditBloc _bloc;
   AudioPlayer? _imageSoundPlayer;
   String? _imageSoundPreviewUrl;
@@ -50,6 +52,7 @@ class _MediaEditViewState extends State<MediaEditView> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bloc = context.getOrCreateBloc();
     unawaited(_loadMediaWithThumbnails());
   }
@@ -109,9 +112,53 @@ class _MediaEditViewState extends State<MediaEditView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_stopImageSoundPreview());
     _bloc.close();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    switch (state) {
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        unawaited(_stopImageSoundPreview());
+        break;
+      case AppLifecycleState.resumed:
+        _resumeImageSoundPreviewIfRouteVisible();
+        break;
+    }
+  }
+
+  bool get _isRouteVisible {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    return route == null || route.isCurrent;
+  }
+
+  void _resumeImageSoundPreviewIfRouteVisible() {
+    if (!_isRouteVisible) return;
+    final blocState = _bloc.state;
+    if (blocState is MediaEditLoadedState) {
+      final item = blocState.mediaEditItems[blocState.currentIndex];
+      unawaited(_syncImageSoundPreview(item));
+    }
+  }
+
+  @override
+  void deactivate() {
+    unawaited(_stopImageSoundPreview());
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _resumeImageSoundPreviewIfRouteVisible();
   }
 
   Future<void> _stopImageSoundPreview() async {
@@ -119,6 +166,7 @@ class _MediaEditViewState extends State<MediaEditView> {
     final player = _imageSoundPlayer;
     _imageSoundPlayer = null;
     if (player != null) {
+      IsrImageSoundRegistry.unregister(player);
       try {
         await player.stop();
         await player.dispose();
@@ -140,9 +188,11 @@ class _MediaEditViewState extends State<MediaEditView> {
     await _stopImageSoundPreview();
     _imageSoundPreviewUrl = url;
     try {
+      await IsrImageSoundRegistry.stopAll();
       final player = AudioPlayer();
       _imageSoundPlayer = player;
       await player.setReleaseMode(ReleaseMode.loop);
+      IsrImageSoundRegistry.register(player);
       await player.play(UrlSource(url));
     } catch (_) {
       await _stopImageSoundPreview();

@@ -55,7 +55,8 @@ class IsmPostView extends StatefulWidget {
   State<IsmPostView> createState() => _PostViewState();
 }
 
-class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
+class _PostViewState extends State<IsmPostView>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   TabController? _postTabController;
   late List<RefreshController> _refreshControllers;
   var _currentIndex = 0;
@@ -123,6 +124,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   /// Prevents stacked pagination API calls when the user swipes past the
   /// load-more threshold repeatedly while a page request is still in flight.
   final Set<PostSectionType> _postFeedLoadMoreInFlight = <PostSectionType>{};
+  ReelsData? _overlayActiveReelsData;
 
   @override
   void initState() {
@@ -143,8 +145,20 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     IsrVideoReelConfig.registerAppForegroundResumedListener(
       _onAppForegroundResumed,
     );
+    WidgetsBinding.instance.addObserver(this);
     _onStartInit();
     super.initState();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final overlayActive = IsrVideoReelConfig.isOverlayReelsPlayerActive;
+    if (widget.isOverlayPlayer != overlayActive) return;
+    IsrVideoReelConfig.handleAppLifecycleState(
+      state,
+      hostReelsTabVisible: !widget.isOverlayPlayer &&
+          IsrVideoReelConfig.isHostFeedTabVisible,
+    );
   }
 
   void _onHostFeedTabResumed() {
@@ -192,6 +206,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     _materializedTabIndices.add(_currentIndex);
     if (widget.isOverlayPlayer && _tabDataModelList.isNotEmpty) {
       _tabDataModelList[_currentIndex].isVisible = true;
+      _seedOverlayActiveReel();
     }
     if (!IsrVideoReelConfig.isSdkInitialize) {
       Utility.showToastMessage('sdk not initialized');
@@ -571,7 +586,13 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
                       _mappedReelsByTab.remove(state.postType);
                       _mappedReelsVersionByTab.remove(state.postType);
                       tabStateData?.isLoading = false;
-                      if (mounted) setState(() {});
+                      if (mounted) {
+                        if (widget.isOverlayPlayer &&
+                            _overlayActiveReelsData == null) {
+                          _seedOverlayActiveReel();
+                        }
+                        setState(() {});
+                      }
                     } else if (state is PostLoadingState &&
                         state.postType != null) {
                       final tabStateData = _tabDataModelList
@@ -596,6 +617,12 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
                 else ...[
                   _buildSingleTabTopBar()
                 ],
+                if (widget.isOverlayPlayer &&
+                    !_isCurrentTabPostFeed &&
+                    _shouldShowOverlayCommentBar)
+                  OverlayReelsCommentBar(
+                    onTap: _onOverlayCommentBarTap,
+                  ),
               ],
             ),
           ),
@@ -856,12 +883,43 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     );
   }
 
+  bool get _shouldShowOverlayCommentBar {
+    if (_postConfig.postUIConfig?.showOverlayCommentBar != true) {
+      return false;
+    }
+    return _overlayCommentBarVisibleFor(_overlayActiveReelsData);
+  }
+
+  bool _overlayCommentBarVisibleFor(ReelsData? reelsData) {
+    if (reelsData == null) return false;
+    if (_isPaidLockedForViewer(reelsData)) return false;
+    if (reelsData.postSetting?.isCommentButtonVisible != true) return false;
+    return true;
+  }
+
+  bool _isPaidLockedForViewer(ReelsData reelsData) {
+    final authorId = reelsData.userId ?? '';
+    if (_loggedInUserId.isNotEmpty && _loggedInUserId == authorId) {
+      return false;
+    }
+    if (reelsData.isLocked != true) return false;
+    final reason = (reelsData.lockReason ?? '').toLowerCase();
+    return reason == 'paid' || (reelsData.isPaid == true);
+  }
+
   EdgeInsetsGeometry _resolvedReelsOverlayPadding(BuildContext context) {
-    final overlay = _postConfig.postUIConfig?.overlayPadding;
-    final bottom = IsrDimens.resolveOverlayBottomInset(
-      context,
-      overlay,
-    );
+    final uiConfig = _postConfig.postUIConfig;
+    final overlay = uiConfig?.overlayPadding;
+    final useCommentBarInset = widget.isOverlayPlayer &&
+        !_isCurrentTabPostFeed &&
+        uiConfig?.showOverlayCommentBar == true &&
+        _overlayCommentBarVisibleFor(_overlayActiveReelsData);
+    final bottom = useCommentBarInset
+        ? OverlayReelsCommentBar.bottomInset(context)
+        : IsrDimens.resolveOverlayBottomInset(
+            context,
+            overlay,
+          );
     if (overlay == null) {
       return EdgeInsets.only(bottom: bottom);
     }
@@ -878,11 +936,18 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     final tabData = tabState.tabDataModel;
     return ReelsConfig(
       postConfig: _postConfig,
+      isOverlayPlayer: widget.isOverlayPlayer,
       isTabVisible: () {
-        if (widget.isOverlayPlayer) return tabState.isVisible;
+        if (widget.isOverlayPlayer) return true;
         if (!IsrVideoReelConfig.isHostFeedTabVisible) return false;
         return tabState.isVisible;
       },
+      onReelsChange: widget.isOverlayPlayer
+          ? (reelsData, _) {
+              if (!mounted) return;
+              setState(() => _overlayActiveReelsData = reelsData);
+            }
+          : null,
       overlayPadding: _resolvedReelsOverlayPadding(context),
       autoMoveNextMedia: _postConfig.autoMoveToNextMedia ||
           _tabConfig.autoMoveToNextPost ||
@@ -1346,6 +1411,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (!widget.isOverlayPlayer &&
         IsrVideoReelConfig.onHostFeedTabResumed == _onHostFeedTabResumed) {
       IsrVideoReelConfig.onHostFeedTabResumed = null;
@@ -1389,6 +1455,52 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
     }
     return _socialActionCubit.isUserLoggedIn;
+  }
+
+  Future<void> _onOverlayCommentBarTap() async {
+    final reelsData = _overlayActiveReelsData;
+    if (reelsData == null) return;
+    final tabData = _currentTabDataModel;
+    _setOverlayPlaybackGate(tabData, allowPlayback: false);
+    try {
+      var isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
+      if (!isUserLoggedIn) {
+        await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
+      }
+      isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
+      if (!isUserLoggedIn || !mounted) return;
+      final updatedCount = await _handleCommentAction(
+        reelsData.postId ?? '',
+        reelsData.commentCount ?? 0,
+        tabData,
+        reelsData.postData is TimeLineData
+            ? reelsData.postData as TimeLineData
+            : null,
+      );
+      if (!mounted || _overlayActiveReelsData?.postId != reelsData.postId) {
+        return;
+      }
+      setState(() {
+        _overlayActiveReelsData =
+            reelsData.copyWith(commentCount: updatedCount);
+      });
+    } finally {
+      if (mounted) {
+        _setOverlayPlaybackGate(tabData, allowPlayback: true);
+      }
+    }
+  }
+
+  void _seedOverlayActiveReel() {
+    if (!widget.isOverlayPlayer) return;
+    final tab = _currentTabDataModel;
+    if (tab.reelsDataList.isEmpty) return;
+    final start = tab.startingPostIndex?.toInt() ?? 0;
+    final index = start.clamp(0, tab.reelsDataList.length - 1);
+    _overlayActiveReelsData = getReelData(
+      tab.reelsDataList[index],
+      loggedInUserId: _loggedInUserId,
+    );
   }
 
   Future<int> _handleCommentAction(

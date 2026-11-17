@@ -86,6 +86,28 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
       _commentItemConfig?.commentTextStyle?.fontFamily ??
       IsrAppConstants.primaryFontFamily;
 
+  bool get _isDarkSheet =>
+      (IsrVideoReelConfig.socialConfig.themeConfig?.brightness ??
+          Brightness.light) ==
+      Brightness.dark;
+
+  /// Real surface color. [IsrColors.white] is the light text token in dark mode.
+  Color get _sheetBackground =>
+      _bottomSheetConfig?.backgroundColor ??
+      (_isDarkSheet ? IsrColors.scaffoldColor : const Color(0xFFFFFFFF));
+
+  Color get _dialogSurface => _isDarkSheet
+      ? (IsrVideoReelConfig.socialConfig.colorsConfig?.dialogColor ??
+          const Color(0xFF2C2C2E))
+      : const Color(0xFFFFFFFF);
+
+  Color get _composerFill => _isDarkSheet
+      ? Color.alphaBlend(const Color(0x14FFFFFF), _sheetBackground)
+      : const Color(0xFFFFFFFF);
+
+  Color get _sheetMuted =>
+      _isDarkSheet ? IsrColors.secondaryTextColor : _igSecondaryText;
+
   TextStyle _mergeCommentTextStyle(
     TextStyle defaults,
     TextStyle? override,
@@ -109,7 +131,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           fontSize: _igTimestampFontSize,
           fontWeight: FontWeight.w400,
           height: 1.1,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         ),
         _commentItemConfig?.timestampStyle,
       );
@@ -131,7 +153,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           fontSize: _igMetaActionFontSize,
           fontWeight: FontWeight.w600,
           height: 1.2,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         ),
         _commentItemConfig?.replyButtonStyle,
       );
@@ -142,7 +164,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           fontSize: _igMetaActionFontSize,
           fontWeight: FontWeight.w400,
           height: 1.1,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         ),
         _commentItemConfig?.likeCountStyle,
       );
@@ -153,7 +175,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           fontSize: _igThreadActionFontSize,
           fontWeight: FontWeight.w600,
           height: 1.2,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         ),
         _commentItemConfig?.viewRepliesStyle,
       );
@@ -311,7 +333,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
     final message = _inlineErrorMessage;
     if (message == null) return const SizedBox.shrink();
 
-    final bg = _bottomSheetConfig?.backgroundColor ?? IsrColors.white;
+    final bg = _sheetBackground;
     final isDark = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark;
     return IgnorePointer(
       child: Center(
@@ -659,7 +681,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
               maxHeight: (_bottomSheetConfig?.maxHeight ?? 80.0).percentHeight,
             ),
             decoration: BoxDecoration(
-              color: _bottomSheetConfig?.backgroundColor ?? IsrColors.white,
+              color: _sheetBackground,
               borderRadius: BorderRadius.vertical(
                 top: Radius.circular(
                   (_bottomSheetConfig?.borderRadius ?? 28.0).responsiveDimension,
@@ -837,9 +859,9 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                   _moreOptionsConfig?.dialogPadding ?? IsrDimens.edgeInsetsAll(IsrDimens.sixteen),
               margin:
                   _moreOptionsConfig?.dialogMargin ?? IsrDimens.edgeInsetsAll(IsrDimens.sixteen),
-              decoration: _moreOptionsConfig?.dialogDecoration ??
+                  decoration: _moreOptionsConfig?.dialogDecoration ??
                   BoxDecoration(
-                    color: IsrColors.white,
+                    color: _dialogSurface,
                     borderRadius: BorderRadius.all(
                       Radius.circular(IsrDimens.twenty),
                     ),
@@ -873,11 +895,15 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                             _moreOptionsConfig?.optionTextStyle ??
                             IsrStyles.primaryText18.copyWith(
                               fontWeight: FontWeight.w500,
+                              color: IsrColors.primaryTextColor,
                             ),
                         textAlign: TextAlign.center,
                       ),
                     ),
-                    const Divider(height: 1),
+                    Divider(
+                      height: 1,
+                      color: IsrColors.primaryTextColor.withValues(alpha: 0.2),
+                    ),
                   ] else ...[
                     TapHandler(
                       onTap: () async {
@@ -913,11 +939,15 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                             _moreOptionsConfig?.optionTextStyle ??
                             IsrStyles.primaryText18.copyWith(
                               fontWeight: FontWeight.w500,
+                              color: IsrColors.primaryTextColor,
                             ),
                         textAlign: TextAlign.center,
                       ),
                     ),
-                    const Divider(height: 1),
+                    Divider(
+                      height: 1,
+                      color: IsrColors.primaryTextColor.withValues(alpha: 0.2),
+                    ),
                   ],
                   TapHandler(
                     onTap: () {
@@ -929,6 +959,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                           _moreOptionsConfig?.optionTextStyle ??
                           IsrStyles.primaryText18.copyWith(
                             fontWeight: FontWeight.w500,
+                            color: IsrColors.primaryTextColor,
                           ),
                       textAlign: TextAlign.center,
                     ),
@@ -1015,7 +1046,10 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                 width: (_headerConfig?.dragHandleWidth ?? 40).responsiveDimension,
                 height: (_headerConfig?.dragHandleHeight ?? 4).responsiveDimension,
                 decoration: BoxDecoration(
-                  color: _headerConfig?.dragHandleColor ?? IsrColors.black.changeOpacity(0.15),
+                  color: _headerConfig?.dragHandleColor ??
+                      (_isDarkSheet
+                          ? IsrColors.primaryTextColor.withValues(alpha: 0.35)
+                          : const Color(0x26000000)),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1135,7 +1169,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
       hintStyle: _replyFieldConfig?.hintTextStyle ??
           IsrStyles.primaryText14.copyWith(
             fontWeight: FontWeight.w400,
-            color: _igSecondaryText,
+            color: _sheetMuted,
           ),
       isDense: true,
       filled: false,
@@ -1507,18 +1541,19 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
   }
 
   Widget _buildReplyingToBanner(CommentDataItem commentDataItem) {
-    final bannerColor = _replyFieldConfig?.replyingToBackgroundColor ?? _igReplyBanner;
+    final bannerColor = _replyFieldConfig?.replyingToBackgroundColor ??
+        (_isDarkSheet ? _composerFill : _igReplyBanner);
     final labelStyle = _replyFieldConfig?.replyingToTextStyle ??
         IsrStyles.primaryText12.copyWith(
           fontWeight: FontWeight.w400,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         );
     final nameStyle = _replyFieldConfig?.replyingToNameStyle ??
         IsrStyles.primaryText12.copyWith(
           fontWeight: FontWeight.w600,
-          color: _igSecondaryText,
+          color: _sheetMuted,
         );
-    final closeColor = _replyFieldConfig?.closeReplyIconColor ?? _igSecondaryText;
+    final closeColor = _replyFieldConfig?.closeReplyIconColor ?? _sheetMuted;
 
     return Container(
       width: double.infinity,
@@ -1566,7 +1601,10 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
         ? (_replyFieldConfig?.replyHintText ?? IsrTranslationFile.addAReply)
         : (_replyFieldConfig?.hintText ?? IsrTranslationFile.addAComment);
     final inputRadius = (_replyFieldConfig?.inputBorderRadius ?? 22).responsiveDimension;
-    final inputBorderColor = _replyFieldConfig?.inputBorderColor ?? _igComposerBorder;
+    final inputBorderColor = _replyFieldConfig?.inputBorderColor ??
+        (_isDarkSheet
+            ? IsrColors.primaryTextColor.withValues(alpha: 0.2)
+            : _igComposerBorder);
     final sendButtonColor = _replyFieldConfig?.sendButtonColor ?? Theme.of(context).primaryColor;
     final sendIconColor = _replyFieldConfig?.sendButtonIconColor ?? IsrColors.white;
     final composerHeight = 44.0.responsiveDimension;
@@ -1628,6 +1666,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                                   textStyle: _replyFieldConfig?.inputTextStyle ??
                                       IsrStyles.primaryText14.copyWith(
                                         fontWeight: FontWeight.w400,
+                                        color: IsrColors.primaryTextColor,
                                       ),
                                   userTagTextStyle: _replyFieldConfig?.inputUserTagTextStyle ??
                                       IsrStyles.primaryText14.copyWith(
@@ -1695,7 +1734,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                       );
 
                       return Material(
-                        color: IsrColors.white,
+                        color: _composerFill,
                         elevation: 0,
                         clipBehavior: Clip.antiAlias,
                         shape: RoundedRectangleBorder(

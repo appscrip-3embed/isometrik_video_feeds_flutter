@@ -341,6 +341,20 @@ class IsrAppNavigator {
   /// Each step is an independent route that pops with a result. See also
   /// [presentCreatePostMediaSelector], [presentCreatePostMediaEditor], and
   /// [presentCreatePostFromMedia] for composing custom flows.
+  /// Shows the host login flow for guests and signed-out users.
+  /// Returns true only when a real account can create content.
+  static Future<bool> ensureCanCreateContent() async {
+    final callback =
+        IsrVideoReelConfig.socialConfig.socialCallBackConfig?.onLoginInvoked;
+    final cubit = IsmSocialActionCubit.instance();
+
+    if (callback == null) return cubit.isUserLoggedIn;
+
+    final allowed = await callback();
+    if (allowed == true) return true;
+    return cubit.isUserLoggedIn;
+  }
+
   static Future<dynamic> goToCreatePostView(
     BuildContext context, {
     TransitionType? transitionType,

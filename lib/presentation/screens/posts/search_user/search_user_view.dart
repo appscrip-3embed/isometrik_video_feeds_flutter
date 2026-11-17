@@ -61,6 +61,56 @@ class _SearchUserViewState extends State<SearchUserView>
       _tagPeopleScreenConfig?.maxTaggedPeople ??
       20;
 
+  bool get _isDark =>
+      (IsrVideoReelConfig.socialConfig.themeConfig?.brightness ??
+          Brightness.light) ==
+      Brightness.dark;
+
+  Color get _scaffoldBg => IsrColors.scaffoldColor;
+
+  Color get _searchFill {
+    final page = _scaffoldBg;
+    if (page.computeLuminance() > 0.55) return const Color(0xFFF5F5F5);
+    return Color.alphaBlend(const Color(0x14FFFFFF), page);
+  }
+
+  /// Typed text must contrast with [_searchFill]. Theme text can be light
+  /// while this field is still a light surface, which hides the input.
+  Color get _fieldTextColor {
+    final fill = _searchFill;
+    final preferred = IsrColors.primaryTextColor;
+    if ((preferred.computeLuminance() - fill.computeLuminance()).abs() >= 0.35) {
+      return preferred;
+    }
+    return fill.computeLuminance() > 0.55
+        ? const Color(0xFF1A1A1A)
+        : const Color(0xFFF5F5F5);
+  }
+
+  Color get _mutedText =>
+      _isDark ? IsrColors.secondaryTextColor : '767676'.toColor();
+
+  Color get _usernameColor =>
+      _isDark ? IsrColors.secondaryTextColor : '666666'.toColor();
+
+  Color get _searchBorder => _isDark
+      ? IsrColors.primaryTextColor.withValues(alpha: 0.18)
+      : '878787'.toColor().changeOpacity(0.5);
+
+  Color get _avatarFill => _isDark
+      ? IsrColors.appColor.withValues(alpha: 0.22)
+      : '#E5F0FB'.color;
+
+  Color get _chipFill =>
+      _isDark ? IsrColors.appColor.withValues(alpha: 0.18) : const Color(0xFFE3F2FD);
+
+  Color get _chipAccent =>
+      _isDark ? IsrColors.appColor : const Color(0xFF1976D2);
+
+  Color get _dividerColor => _isDark
+      ? IsrColors.primaryTextColor.withValues(alpha: 0.18)
+      : IsrColors.dividerColor;
+
   @override
   void initState() {
     super.initState();
@@ -220,7 +270,7 @@ class _SearchUserViewState extends State<SearchUserView>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: _scaffoldBg,
         resizeToAvoidBottomInset: true,
         appBar: IsmCustomAppBarWidget(
           backgroundColor:
@@ -254,10 +304,23 @@ class _SearchUserViewState extends State<SearchUserView>
                   right: 16.responsiveDimension,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF5F5F5),
+                  color: _searchFill,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: TextField(
+                child: Builder(
+                  builder: (context) {
+                    final ink = _fieldTextColor;
+                    final theme = Theme.of(context);
+                    return Theme(
+                      data: theme.copyWith(
+                        textTheme: theme.textTheme.copyWith(
+                          bodyLarge: (theme.textTheme.bodyLarge ?? const TextStyle())
+                              .copyWith(color: ink),
+                          titleMedium: (theme.textTheme.titleMedium ?? const TextStyle())
+                              .copyWith(color: ink),
+                        ),
+                      ),
+                      child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
                   autofocus: true,
@@ -266,49 +329,45 @@ class _SearchUserViewState extends State<SearchUserView>
                   autocorrect: false,
                   enableSuggestions: false,
                   textCapitalization: TextCapitalization.none,
+                  cursorColor: IsrColors.appColor,
                   onChanged: (value) {
                     // Only perform search if we're not currently selecting a user
                     if (!_isSelectingUser) {
                       _performSearch(value);
                     }
                   },
-                  style: IsrStyles.primaryText16,
+                  style: IsrStyles.primaryText16.copyWith(
+                    inherit: true,
+                    color: ink,
+                  ),
                   decoration: InputDecoration(
                     hintText: IsrTranslationFile.search,
-                    hintStyle: IsrStyles.primaryText14
-                        .copyWith(color: '767676'.toColor()),
-                    prefixIconColor: '#878787'.toColor(),
-                    fillColor: 'F5F5F5'.toColor(),
+                    hintStyle: IsrStyles.primaryText14.copyWith(color: _mutedText),
+                    prefixIconColor: _mutedText,
+                    fillColor: _searchFill,
+                    filled: true,
                     focusedBorder: OutlineInputBorder(
                       borderRadius: IsrDimens.borderRadiusAll(IsrDimens.eight),
-                      borderSide: BorderSide(
-                        color: '878787'.toColor().changeOpacity(0.5),
-                      ),
+                      borderSide: BorderSide(color: _searchBorder),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: IsrDimens.borderRadiusAll(IsrDimens.eight),
-                      borderSide: BorderSide(
-                        color: 'F5F5F5'.toColor(),
-                      ),
+                      borderSide: BorderSide(color: _searchFill),
                     ),
                     errorBorder: OutlineInputBorder(
                       borderRadius: IsrDimens.borderRadiusAll(IsrDimens.eight),
-                      borderSide: BorderSide(
-                        color: 'F5F5F5'.toColor(),
-                      ),
+                      borderSide: BorderSide(color: _searchFill),
                     ),
                     disabledBorder: OutlineInputBorder(
                       borderRadius: IsrDimens.borderRadiusAll(IsrDimens.eight),
-                      borderSide: BorderSide(
-                        color: 'F5F5F5'.toColor(),
-                      ),
+                      borderSide: BorderSide(color: _searchFill),
                     ),
                     prefixIcon: Container(
                       width: 44.responsiveDimension,
                       alignment: Alignment.center,
                       child: AppImage.svg(
                         AssetConstants.icSearchIcon,
-                        color: '#878787'.toColor(),
+                        color: _mutedText,
                         height: 20,
                         width: 20,
                       ),
@@ -347,6 +406,9 @@ class _SearchUserViewState extends State<SearchUserView>
                         : null,
                     border: InputBorder.none,
                   ),
+                      ),
+                    );
+                  },
                 ),
               ),
 
@@ -356,8 +418,11 @@ class _SearchUserViewState extends State<SearchUserView>
               // Search results
               Expanded(
                 child: _isSearching
-                    ? const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    ? Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: IsrColors.appColor,
+                        ),
                       )
                     : _searchResults.isNotEmpty
                         ? _buildSearchResults()
@@ -378,8 +443,10 @@ class _SearchUserViewState extends State<SearchUserView>
           children: [
             Text(
               IsrTranslationFile.selectedPeople,
-              style:
-                  IsrStyles.primaryText14.copyWith(fontWeight: FontWeight.w600),
+              style: IsrStyles.primaryText14.copyWith(
+                fontWeight: FontWeight.w600,
+                color: IsrColors.primaryTextColor,
+              ),
             ),
             8.verticalSpace,
             SingleChildScrollView(
@@ -399,9 +466,9 @@ class _SearchUserViewState extends State<SearchUserView>
             horizontal: 12.responsiveDimension,
             vertical: 8.responsiveDimension),
         decoration: BoxDecoration(
-          color: const Color(0xFFE3F2FD),
+          color: _chipFill,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF1976D2), width: 1),
+          border: Border.all(color: _chipAccent, width: 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -416,7 +483,7 @@ class _SearchUserViewState extends State<SearchUserView>
                   )
                 : CircleAvatar(
                     radius: IsrDimens.ten,
-                    backgroundColor: '#E5F0FB'.color,
+                    backgroundColor: _avatarFill,
                     child: Text(
                       Utility.getInitials(
                         firstName:
@@ -435,7 +502,7 @@ class _SearchUserViewState extends State<SearchUserView>
               child: Text(
                 user.username ?? 'Unknown User',
                 style: IsrStyles.primaryText14.copyWith(
-                    fontWeight: FontWeight.w500, color: '1976D2'.toColor()),
+                    fontWeight: FontWeight.w500, color: _chipAccent),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -445,8 +512,8 @@ class _SearchUserViewState extends State<SearchUserView>
               onTap: () => _toggleSelection(user),
               child: Container(
                 padding: IsrDimens.edgeInsetsAll(2.responsiveDimension),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1976D2),
+                decoration: BoxDecoration(
+                  color: _chipAccent,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -470,23 +537,24 @@ class _SearchUserViewState extends State<SearchUserView>
               Icon(
                 Icons.search,
                 size: 64.responsiveDimension,
-                color: Colors.grey[300],
+                color: _isDark ? IsrColors.secondaryTextColor : Colors.grey[300],
               ),
               24.verticalSpace,
               Text(
                 _currentSearchText.isEmptyOrNull
                     ? IsrTranslationFile.searchForPeople
                     : IsrTranslationFile.noUserFound,
-                style: IsrStyles.primaryText18
-                    .copyWith(fontWeight: FontWeight.w600),
+                style: IsrStyles.primaryText18.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: IsrColors.primaryTextColor,
+                ),
               ),
               8.verticalSpace,
               Text(
                 _currentSearchText.isEmptyOrNull
                     ? IsrTranslationFile.startTypingToFindPeopleToTag
                     : IsrTranslationFile.trySearchingWithADifferentName,
-                style:
-                    IsrStyles.primaryText14.copyWith(color: '666666'.toColor()),
+                style: IsrStyles.primaryText14.copyWith(color: _usernameColor),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -510,8 +578,11 @@ class _SearchUserViewState extends State<SearchUserView>
                 padding: IsrDimens.edgeInsetsSymmetric(
                   vertical: 16.responsiveDimension,
                 ),
-                child: const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: IsrColors.appColor,
+                  ),
                 ),
               );
             }
@@ -520,7 +591,8 @@ class _SearchUserViewState extends State<SearchUserView>
             return Column(
               children: [
                 _buildSearchResultItem(result, index),
-                if (index != _searchResults.length - 1) const CustomDivider(),
+                if (index != _searchResults.length - 1)
+                  CustomDivider(color: _dividerColor),
               ],
             );
           },
@@ -546,11 +618,13 @@ class _SearchUserViewState extends State<SearchUserView>
                     height: 40.responsiveDimension,
                     width: 40.responsiveDimension,
                     name: result.fullName ?? '',
-                    border: Border.all(color: IsrColors.colorCCCCCC),
+                    border: Border.all(
+                      color: _isDark ? _dividerColor : IsrColors.colorCCCCCC,
+                    ),
                   )
                 : CircleAvatar(
                     radius: IsrDimens.twenty,
-                    backgroundColor: '#E5F0FB'.color,
+                    backgroundColor: _avatarFill,
                     child: Text(
                       Utility.getInitials(
                         firstName:
@@ -573,16 +647,17 @@ class _SearchUserViewState extends State<SearchUserView>
                   Text(
                     result.displayName ?? '',
                     style: IsrStyles.primaryText16.copyWith(
-                        fontWeight:
-                            isSelected ? FontWeight.w600 : FontWeight.w500),
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w500,
+                      color: IsrColors.primaryTextColor,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   2.verticalSpace,
                   Text(
                     result.username!,
-                    style: IsrStyles.primaryText14
-                        .copyWith(color: '666666'.toColor()),
+                    style: IsrStyles.primaryText14.copyWith(color: _usernameColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -596,12 +671,10 @@ class _SearchUserViewState extends State<SearchUserView>
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(
-                  color:
-                      isSelected ? const Color(0xFF1976D2) : '767676'.toColor(),
+                  color: isSelected ? _chipAccent : _mutedText,
                   width: 2,
                 ),
-                color:
-                    isSelected ? const Color(0xFF1976D2) : Colors.transparent,
+                color: isSelected ? _chipAccent : Colors.transparent,
               ),
               child: isSelected
                   ? Center(

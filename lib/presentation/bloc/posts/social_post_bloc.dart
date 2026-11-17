@@ -1009,11 +1009,16 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
       pageLimit: 20,
     );
     if (apiResult.isError) {
-      _maybeNotifyPostDeleted(
+      // Comments failures must not remove the post. A just-uploaded post with
+      // no comments often 404s here; evicting it closes the player when it is
+      // the only post. Confirm with post detail instead.
+      _confirmPostIfCommentsLookMissing(
         postId: event.postId,
         statusCode: apiResult.error?.statusCode ?? apiResult.statusCode,
         errorMessage: apiResult.error?.message,
       );
+    } else if (apiResult.statusCode == 404 || apiResult.statusCode == 410) {
+      unawaited(_refreshPostFromDetailForHostCache(event.postId));
     }
     final postCommentsList = apiResult.data?.data;
 
@@ -1702,6 +1707,25 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     } finally {
       _postDetailRefreshInFlight.remove(postId);
     }
+  }
+
+  /// Comments 404s are ambiguous (empty thread vs missing post). Ask post
+  /// detail before evicting so a new single post is not popped off screen.
+  void _confirmPostIfCommentsLookMissing({
+    required String postId,
+    int? statusCode,
+    String? errorMessage,
+  }) {
+    if (IsrVideoReelConfig.feedCacheConfig == null) return;
+    if (postId.isEmpty) return;
+    final code = statusCode;
+    final msg = (errorMessage ?? '').toLowerCase();
+    final looksMissing = code == 404 ||
+        code == 410 ||
+        msg.contains('not found') ||
+        msg.contains('post deleted');
+    if (!looksMissing) return;
+    unawaited(_refreshPostFromDetailForHostCache(postId));
   }
 
   /// When host-cache integration is enabled, surface a deletion signal via

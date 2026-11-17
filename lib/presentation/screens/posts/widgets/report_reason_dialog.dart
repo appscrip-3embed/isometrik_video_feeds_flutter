@@ -64,7 +64,12 @@ class _ReportReasonDialogState extends State<ReportReasonDialog> {
           padding: IsrDimens.edgeInsetsAll(IsrDimens.sixteen),
           margin: IsrDimens.edgeInsetsAll(IsrDimens.sixteen),
           decoration: BoxDecoration(
-            color: IsrColors.white,
+            color: (IsrVideoReelConfig.socialConfig.themeConfig?.brightness ??
+                        Brightness.light) ==
+                    Brightness.dark
+                ? (IsrVideoReelConfig.socialConfig.colorsConfig?.dialogColor ??
+                    IsrColors.scaffoldColor)
+                : const Color(0xFFFFFFFF),
             borderRadius: BorderRadius.all(
               Radius.circular(IsrDimens.twenty),
             ),
@@ -82,6 +87,7 @@ class _ReportReasonDialogState extends State<ReportReasonDialog> {
                     style: IsrStyles.primaryText18.copyWith(
                       fontWeight: FontWeight.w600,
                       decoration: TextDecoration.none,
+                      color: IsrColors.primaryTextColor,
                     ),
                   ),
                   IconButton(
@@ -98,7 +104,7 @@ class _ReportReasonDialogState extends State<ReportReasonDialog> {
                       AssetConstants.icCrossIcon,
                       height: IsrDimens.sixteen,
                       width: IsrDimens.sixteen,
-                      color: IsrColors.black,
+                      color: IsrColors.primaryTextColor,
                     ),
                   ),
                 ],

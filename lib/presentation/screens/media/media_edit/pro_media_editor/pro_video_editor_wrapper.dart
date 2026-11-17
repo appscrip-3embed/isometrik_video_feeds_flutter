@@ -13,6 +13,13 @@ import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 import 'package:video_player/video_player.dart';
 
+/// [VideoEditorControlsWidget] insets the trim bar by
+/// `toolbarPadding - trimBarHandlerButtonSize`. Padding must stay >= 0.
+const double _trimBarHandlerButtonSize = 12;
+
+double _nonNegativeTrimInset(double inset) =>
+    inset < _trimBarHandlerButtonSize ? _trimBarHandlerButtonSize : inset;
+
 class ProVideoEditorWrapper extends StatefulWidget {
   const ProVideoEditorWrapper({
     super.key,
@@ -81,11 +88,15 @@ class _ProVideoEditorWrapperState extends State<ProVideoEditorWrapper>
         trimBarBackground: widget.mediaEditConfig.primaryColor,
         trimBarBorderWidth: 2,
         trimBarColor: widget.mediaEditConfig.primaryColor,
+        // Trim-bar padding is `toolbarPadding - trimBarHandlerButtonSize`.
+        // `12.sp` is under 12 on screens narrower than the 390 design width,
+        // which makes that padding negative and crashes RenderPadding.
+        trimBarHandlerButtonSize: _trimBarHandlerButtonSize,
         toolbarPadding: EdgeInsets.only(
             bottom: 16.responsiveDimension,
             top: 16.responsiveDimension,
-            left: 12.responsiveDimension,
-            right: 12.responsiveDimension),
+            left: _nonNegativeTrimInset(12.responsiveDimension),
+            right: _nonNegativeTrimInset(12.responsiveDimension)),
         muteButtonBackground:
             widget.mediaEditConfig.blackColor.withValues(alpha: 0.4),
         muteButtonColor: widget.mediaEditConfig.whiteColor,

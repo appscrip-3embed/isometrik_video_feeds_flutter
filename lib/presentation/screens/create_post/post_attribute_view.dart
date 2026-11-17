@@ -2159,22 +2159,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     return res?.firstOrNull?.localPath;
   }
 
-  final mediaSelectionConfig = ms.MediaSelectionConfig(
-    isMultiSelect: true,
-    imageMediaLimit: IsrAppConstants.imageMediaLimit,
-    videoMediaLimit: IsrAppConstants.videoMediaLimit,
-    mediaLimit: IsrAppConstants.totalMediaLimit,
-    singleSelectModeIcon: const AppImage.svg(AssetConstants.icMediaSelectSingle),
-    multiSelectModeIcon: const AppImage.svg(AssetConstants.icMediaSelectMultiple),
-    doneButtonText: IsrTranslationFile.next,
-    selectMediaTitle: IsrTranslationFile.newReel,
-    primaryColor: IsrColors.appColor,
-    primaryTextColor: IsrColors.primaryTextColor,
-    backgroundColor: Colors.white,
-    appBarColor: Colors.white,
-    primaryFontFamily: IsrAppConstants.primaryFontFamily,
-    mediaListType: ms.MediaListType.imageVideo,
-  );
+  final mediaSelectionConfig =
+      CreatePostFlowCoordinator.defaultMediaSelectionConfig();
 
   Future<dynamic> _captureMedia(String? mediaType) async =>
       await Navigator.of(context, rootNavigator: true).push<dynamic>(

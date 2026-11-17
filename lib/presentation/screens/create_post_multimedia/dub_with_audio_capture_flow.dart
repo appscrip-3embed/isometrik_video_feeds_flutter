@@ -25,6 +25,7 @@ class DubWithAudioCaptureCoordinator {
       return;
     }
 
+    if (!await IsrAppNavigator.ensureCanCreateContent()) return;
     if (!context.mounted) return;
 
     if (post.isLocked == true) {
@@ -73,6 +74,8 @@ class DubWithAudioCaptureCoordinator {
     BuildContext context,
     CreatePostLaunchConfig launchConfig,
   ) async {
+    if (!await IsrAppNavigator.ensureCanCreateContent()) return;
+    if (!context.mounted) return;
     final track = launchConfig.dubSoundTrack;
     final audioPath = launchConfig.dubAudioFilePath;
     if (track == null || audioPath == null || audioPath.isEmpty) return;

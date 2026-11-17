@@ -189,6 +189,8 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
 
   Future<void> _onUseAudio() async {
     if (_useAudioLoading) return;
+    final allowed = await IsrAppNavigator.ensureCanCreateContent();
+    if (!allowed || !mounted) return;
     setState(() => _useAudioLoading = true);
     await _previewPlayer.pause();
     IsrVideoReelConfig.suppressPlayback();

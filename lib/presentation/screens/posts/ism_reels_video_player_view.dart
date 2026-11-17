@@ -86,6 +86,30 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   // Config helper getters
   PostUIConfig? get _uiConfig => _postConfig.postUIConfig;
   ActionIconConfig? get _actionIconConfig => _uiConfig?.actionIconConfig;
+
+  /// Full-screen reel side actions. Prefers the reels preset (glass circles
+  /// when the host set [PostUIConfig.reelsActionIconConfig]).
+  ActionIconConfig get _reelsActionIconConfig =>
+      _uiConfig?.reelsActionIconConfig ??
+      _uiConfig?.actionIconConfig ??
+      ActionIconConfig.reels;
+
+  bool get _isGlassReelsActionIcons =>
+      _reelsActionIconConfig.containerStyle == ActionIconContainerStyle.glass;
+
+  double get _reelsSideActionSlotWidth {
+    if (_isGlassReelsActionIcons) {
+      return _reelsActionIconConfig.glassConfig?.containerSize.toDouble() ??
+          40;
+    }
+    return _reelsActionIconConfig.iconSize ?? IsrDimens.twentyFive;
+  }
+
+  /// Keeps the caption clear of the right-hand action column.
+  double get _reelsOverlayRightContentInset {
+    if (!_isGlassReelsActionIcons) return 56;
+    return _reelsSideActionSlotWidth + IsrDimens.twentyFour;
+  }
   TextStyleConfig? get _textStyleConfig => _uiConfig?.textStyleConfig;
   ShopUIConfig? get _shopUIConfig => _uiConfig?.shopUIConfig;
   PostLinkUIConfig? get _postLinkUIConfig => _uiConfig?.postLinkUIConfig;
@@ -2103,22 +2127,38 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                   //right action
                   //kept separate so that it does not bloc touch/gesture to underlying widgets
                   if (!_shouldShowPaidLockOverlay)
-                    Positioned(
-                      right: widget.reelsConfig.overlayPadding
-                              ?.resolve(Directionality.of(context))
-                              .right ??
-                          0,
-                      bottom: _contentBottomInset(context),
-                      child: widget.reelsConfig.actionWidget
-                              ?.call(_reelData)
-                              .child ??
-                          _buildRightSideActions(),
-                    ),
+                    _isGlassReelsActionIcons
+                        ? Positioned(
+                            top: 0,
+                            bottom: 0,
+                            right: widget.reelsConfig.overlayPadding
+                                    ?.resolve(Directionality.of(context))
+                                    .right ??
+                                0,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: widget.reelsConfig.actionWidget
+                                      ?.call(_reelData)
+                                      .child ??
+                                  _buildRightSideActions(),
+                            ),
+                          )
+                        : Positioned(
+                            right: widget.reelsConfig.overlayPadding
+                                    ?.resolve(Directionality.of(context))
+                                    .right ??
+                                0,
+                            bottom: _contentBottomInset(context),
+                            child: widget.reelsConfig.actionWidget
+                                    ?.call(_reelData)
+                                    .child ??
+                                _buildRightSideActions(),
+                          ),
 
                   //bottom section
                   //kept separate so that it does not bloc touch/gesture to underlying widgets
                   Positioned(
-                    right: 40,
+                    right: _reelsOverlayRightContentInset,
                     bottom: _contentBottomInset(context),
                     left: widget.reelsConfig.overlayPadding
                             ?.resolve(Directionality.of(context))
@@ -2167,8 +2207,12 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   Widget _buildRightSideActions() => RepaintBoundary(
         child: Padding(
-          padding: IsrDimens.edgeInsets(
-              bottom: IsrDimens.forty, right: IsrDimens.sixteen),
+          padding: _isGlassReelsActionIcons
+              ? IsrDimens.edgeInsets(right: IsrDimens.sixteen)
+              : IsrDimens.edgeInsets(
+                  bottom: IsrDimens.forty,
+                  right: IsrDimens.sixteen,
+                ),
           child: DefaultTextStyle(
             style: _reelsActionLabelStyle,
             child: Column(
@@ -2212,9 +2256,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                       _reelData.likesCount = likeCount;
                       _onLikeTap = onTap;
                       final likeIcon = isLiked == true
-                          ? (_actionIconConfig?.likeIconSelected ??
+                          ? (_reelsActionIconConfig.likeIconSelected ??
                               AssetConstants.icLikeSelected)
-                          : (_actionIconConfig?.likeIconUnselected ??
+                          : (_reelsActionIconConfig.likeIconUnselected ??
                               AssetConstants.icLikeUnSelected);
                       return _buildActionButton(
                         icon: likeIcon,
@@ -2242,7 +2286,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                     builder: (commentCount) {
                       _reelData.commentCount = commentCount;
                       return _buildActionButton(
-                        icon: _actionIconConfig?.commentIcon ??
+                        icon: _reelsActionIconConfig.commentIcon ??
                             AssetConstants.icCommentIcon,
                         label: commentCount.toString(),
                         onTap: _handleCommentClick,
@@ -2252,7 +2296,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                 if (_shouldShowTipAction) _buildTipAction(),
                 if (_reelData.postSetting?.isShareButtonVisible == true)
                   _buildActionButton(
-                    icon: _actionIconConfig?.shareIcon ??
+                    icon: _reelsActionIconConfig.shareIcon ??
                         AssetConstants.icShareIconSvg,
                     label: IsrTranslationFile.share,
                     onTap: () async {
@@ -2268,9 +2312,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                       _reelData.isSavedPost = isSaved;
                       return _buildActionButton(
                         icon: isSaved == true
-                            ? (_actionIconConfig?.saveIconSelected ??
+                            ? (_reelsActionIconConfig.saveIconSelected ??
                                 AssetConstants.icSaveSelected)
-                            : (_actionIconConfig?.saveIconUnselected ??
+                            : (_reelsActionIconConfig.saveIconUnselected ??
                                 AssetConstants.icSaveUnSelected),
                         label: isSaved == true
                             ? IsrTranslationFile.saved
@@ -2290,7 +2334,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                   ),
                 if (_reelData.postSetting?.isMoreButtonVisible == true)
                   _buildActionButton(
-                    icon: _actionIconConfig?.moreIcon ??
+                    icon: _reelsActionIconConfig.moreIcon ??
                         AssetConstants.icMoreIcon,
                     label: '',
                     onTap: () async {
@@ -2313,13 +2357,13 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                boxShadow:
-                    _actionIconConfig?.iconShadow ?? _defaultActionIconShadow,
+                boxShadow: _reelsActionIconConfig.iconShadow ??
+                    _defaultActionIconShadow,
               ),
               child: Icon(
                 Icons.remove_red_eye_outlined,
                 color: IsrColors.white,
-                size: _actionIconConfig?.iconSize ?? IsrDimens.twentyFive,
+                size: _reelsActionIconConfig.iconSize ?? IsrDimens.twentyFive,
               ),
             ),
             IsrDimens.boxHeight(IsrDimens.four),
@@ -2344,13 +2388,13 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                boxShadow:
-                    _actionIconConfig?.iconShadow ?? _defaultActionIconShadow,
+                boxShadow: _reelsActionIconConfig.iconShadow ??
+                    _defaultActionIconShadow,
               ),
               child: Icon(
                 Icons.volunteer_activism_outlined,
                 color: IsrColors.white,
-                size: _actionIconConfig?.iconSize ?? IsrDimens.twentyFive,
+                size: _reelsActionIconConfig.iconSize ?? IsrDimens.twentyFive,
               ),
             ),
             IsrDimens.boxHeight(IsrDimens.four),
@@ -2440,17 +2484,11 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
             else
               GestureDetector(
                 onTap: onIconTap ?? onTap,
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: _actionIconConfig?.iconShadow ??
-                        _defaultActionIconShadow,
-                  ),
-                  child: AppImage.svg(
-                    icon,
-                    width: _actionIconConfig?.iconSize ?? IsrDimens.twentyFive,
-                    height: _actionIconConfig?.iconSize ?? IsrDimens.twentyFive,
+                child: ActionIconContainer(
+                  config: _reelsActionIconConfig,
+                  child: ActionIconImage(
+                    path: icon,
+                    config: _reelsActionIconConfig,
                   ),
                 ),
               ),
@@ -3420,10 +3458,18 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       if (!mounted ||
           !_isCurrentReel ||
           !widget.reelsConfig.isTabVisible() ||
+          IsrVideoReelConfig.isAppInBackground ||
+          !IsrVideoReelConfig.allowsPlayback ||
           !IsrImageSoundRegistry.ownsPlayback(this)) {
         return;
       }
       await player.setVolume(VideoMuteController.isMuted ? 0.0 : 1.0);
+      if (IsrVideoReelConfig.isAppInBackground ||
+          !IsrVideoReelConfig.allowsPlayback ||
+          !IsrImageSoundRegistry.ownsPlayback(this)) {
+        await player.pause();
+        return;
+      }
       if (player.state != PlayerState.playing) {
         await player.resume();
       }
