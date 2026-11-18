@@ -60,7 +60,7 @@ class IsmPostView extends StatefulWidget {
 }
 
 class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
-  TabController? _postTabController;
+  _LoginGatedTabController? _postTabController;
   late List<RefreshController> _refreshControllers;
   var _currentIndex = 1;
   var _loggedInUserId = '';
@@ -108,11 +108,17 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   AnimationStatusListener? _routeEnterStatusListener;
   var _initialPostLoadDispatched = false;
   var _initialCommentOpenAttempted = false;
-  var _tabChangeRequestId = 0;
+  var _gatedTabRequestId = 0;
+  Completer<void>? _loginFlow;
   final Set<int> _materializedTabIndices = <int>{};
+
   /// Prevents stacked pagination API calls when the user swipes past the
   /// load-more threshold repeatedly while a page request is still in flight.
   final Set<PostSectionType> _postFeedLoadMoreInFlight = <PostSectionType>{};
+
+  /// Host-owned [PostSectionType.multiplePost] pagination; false after an
+  /// empty [TabCallBackConfig.onLoadMorePosts] result.
+  final Map<PostSectionType, bool> _hostHasMoreByTab = <PostSectionType, bool>{};
 
   @override
   void initState() {
@@ -186,11 +192,14 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       Utility.showToastMessage('sdk not initialized');
       return;
     }
-    // Initialize TabController with initialIndex = _currentIndex
-    _postTabController = TabController(
+    // Initialize TabController with initialIndex = _currentIndex.
+    // User-dependent taps are held here until login succeeds.
+    _postTabController = _LoginGatedTabController(
       length: _tabDataModelList.length,
       vsync: this,
       initialIndex: _currentIndex,
+      isUserDependentIndex: _isUserDependentTab,
+      onBlockedTap: _onGatedTabTap,
     );
 
     _refreshControllers =
@@ -206,7 +215,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     }
     _scheduleReelsBodyWhenRouteSettled();
     _loggedInUserId = await _socialPostBloc.userId;
-    _postTabController?.addListener(() async {
+    _postTabController?.addListener(() {
       if (!mounted) return;
       final controller = _postTabController;
       if (controller == null || controller.indexIsChanging) return;
@@ -214,46 +223,104 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       final newIndex = controller.index;
       if (newIndex < 0 || newIndex >= _tabDataModelList.length) return;
       final lastIndex = _currentIndex;
-      if (_currentIndex != newIndex) {
-        final requestId = ++_tabChangeRequestId;
-        _currentIndex = newIndex;
-        _materializedTabIndices.add(newIndex);
-        final tabData = _tabDataModelList[newIndex];
-        if (tabData.tabDataModel.postSectionType.isUserDependent) {
-          var isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
-          if (!mounted || requestId != _tabChangeRequestId) return;
-          if (!isUserLoggedIn) {
-            await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
-            isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
-            if (!mounted || requestId != _tabChangeRequestId) return;
-          }
-          if (!isUserLoggedIn) {
-            _currentIndex = lastIndex;
-            final safeIndex = lastIndex.clamp(0, _tabDataModelList.length - 1);
-            if ((_postTabController?.index ?? safeIndex) != safeIndex) {
-              _postTabController?.animateTo(safeIndex);
-            }
-            return;
-          }
-        }
-        _currentPostSectionType = tabData.tabDataModel.postSectionType;
-        _tabConfig.tabCallBackConfig?.onChangeOfTab?.call(tabData.tabDataModel);
-        // Handle tab change if we have a user
-        if (_loggedInUserId.isNotEmpty) {
-          try {
-            _videoCacheManager = VideoCacheManager();
-          } catch (e) {
-            debugPrint('Error during tab change: $e');
-          }
-        }
-        if (!mounted || requestId != _tabChangeRequestId) return;
-        _handoffTabPlayback(lastIndex: lastIndex, newIndex: newIndex);
-        setState(() {});
-        if (tabData.tabDataModel.reelsDataList.isEmpty) {
-          _requestHomeTabLoad(tabData);
+      if (_currentIndex == newIndex) return;
+      _currentIndex = newIndex;
+      _materializedTabIndices.add(newIndex);
+      final tabData = _tabDataModelList[newIndex];
+      _currentPostSectionType = tabData.tabDataModel.postSectionType;
+      _tabConfig.tabCallBackConfig?.onChangeOfTab?.call(tabData.tabDataModel);
+      // Handle tab change if we have a user
+      if (_loggedInUserId.isNotEmpty) {
+        try {
+          _videoCacheManager = VideoCacheManager();
+        } catch (e) {
+          debugPrint('Error during tab change: $e');
         }
       }
+      if (!mounted) return;
+      _handoffTabPlayback(lastIndex: lastIndex, newIndex: newIndex);
+      setState(() {});
+      if (tabData.tabDataModel.reelsDataList.isEmpty) {
+        _requestHomeTabLoad(tabData);
+      }
     });
+  }
+
+  bool _isUserDependentTab(int index) {
+    if (index < 0 || index >= _tabDataModelList.length) return false;
+    return _tabDataModelList[index]
+        .tabDataModel
+        .postSectionType
+        .isUserDependent;
+  }
+
+  /// Holds the current tab, then moves only if the user is logged in.
+  void _onGatedTabTap(int index) {
+    final controller = _postTabController;
+    if (!mounted || controller == null) return;
+    if (index < 0 || index >= _tabDataModelList.length) return;
+    if (index == controller.index) return;
+
+    final requestId = ++_gatedTabRequestId;
+    final originIndex = controller.index;
+    unawaited(
+      _switchToUserDependentTab(
+        index: index,
+        requestId: requestId,
+        originIndex: originIndex,
+      ),
+    );
+  }
+
+  Future<void> _switchToUserDependentTab({
+    required int index,
+    required int requestId,
+    required int originIndex,
+  }) async {
+    var isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
+    if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+    if (!isUserLoggedIn) {
+      await _awaitLoginFlow();
+      if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+      isUserLoggedIn = await _socialPostBloc.isUserLoggedIn;
+      if (!_isGatedTabRequestCurrent(requestId, originIndex)) return;
+    }
+    if (!isUserLoggedIn) return;
+
+    final controller = _postTabController;
+    if (controller == null || controller.index == index) return;
+    controller.animateToAllowed(index);
+  }
+
+  /// Shares one login sheet if several gated taps overlap.
+  Future<void> _awaitLoginFlow() {
+    final inFlight = _loginFlow;
+    if (inFlight != null) return inFlight.future;
+
+    final completer = Completer<void>();
+    _loginFlow = completer;
+    unawaited(_runLoginFlow(completer));
+    return completer.future;
+  }
+
+  Future<void> _runLoginFlow(Completer<void> completer) async {
+    try {
+      await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
+    } catch (e) {
+      debugPrint('ism_post_view: login flow failed: $e');
+    } finally {
+      if (identical(_loginFlow, completer)) {
+        _loginFlow = null;
+      }
+      if (!completer.isCompleted) completer.complete();
+    }
+  }
+
+  bool _isGatedTabRequestCurrent(int requestId, int originIndex) {
+    if (!mounted || requestId != _gatedTabRequestId) return false;
+    final controller = _postTabController;
+    if (controller == null) return false;
+    return controller.index == originIndex;
   }
 
   /// Stops image/sound bleed from a kept-alive offstage tab (e.g. Feed → Following).
@@ -457,132 +524,139 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   Widget _buildContent() => Material(
         type: MaterialType.transparency,
         child: AnnotatedRegion(
-        value: SystemUiOverlayStyle(
-          statusBarColor: _statusBarConfig?.statusBarColor ??
-              (_isCurrentTabPostFeed
-                  ? _postConfig.resolvedPostFeedUIConfig.backgroundColor
-                  : IsrColors.transparent),
-          statusBarBrightness: _statusBarConfig?.statusBarBrightness ??
-              (_isCurrentTabPostFeed ? Brightness.light : Brightness.dark),
-          statusBarIconBrightness: _statusBarConfig?.statusBarIconBrightness ??
-              (_isCurrentTabPostFeed ? Brightness.dark : Brightness.light),
-        ),
-        child: context.attachBlocIfNeeded<IsmSocialActionCubit>(
-          bloc: _socialActionCubit,
-          child: BlocListener<IsmSocialActionCubit, IsmSocialActionState>(
-            listenWhen: (previousState, currentState) =>
-                currentState is IsmDeletedPostActionListenerState ||
-                currentState is IsmMentionRemovedActionListenerState ||
-                currentState is IsmEditPostActionListenerState ||
-                currentState is IsmUserChangedActionListenerState,
-            listener: (context, state) {
-              // Do Not setState to prevent reels to start from first
-              // this is only to update data to update ui it is done in post_item_widget
-              if (state is IsmDeletedPostActionListenerState &&
-                  state.postId?.isNotEmpty == true) {
-                _removePostFromList(state.postId!);
-              } else if (state is IsmMentionRemovedActionListenerState) {
-                _stripSelfMentionFromTimelinePost(state.postId);
-                if (state.postId.isNotEmpty &&
-                    _tabDataModelList.any(
-                      (tab) =>
-                          tab.tabDataModel.postSectionType ==
-                          PostSectionType.myTaggedPost,
-                    )) {
-                  _removePostFromList(state.postId);
+          value: SystemUiOverlayStyle(
+            statusBarColor: _statusBarConfig?.statusBarColor ??
+                (_isCurrentTabPostFeed
+                    ? _postConfig.resolvedPostFeedUIConfig.backgroundColor
+                    : IsrColors.transparent),
+            statusBarBrightness: _statusBarConfig?.statusBarBrightness ??
+                (_isCurrentTabPostFeed ? Brightness.light : Brightness.dark),
+            statusBarIconBrightness: _statusBarConfig
+                    ?.statusBarIconBrightness ??
+                (_isCurrentTabPostFeed ? Brightness.dark : Brightness.light),
+          ),
+          child: context.attachBlocIfNeeded<IsmSocialActionCubit>(
+            bloc: _socialActionCubit,
+            child: BlocListener<IsmSocialActionCubit, IsmSocialActionState>(
+              listenWhen: (previousState, currentState) =>
+                  currentState is IsmDeletedPostActionListenerState ||
+                  currentState is IsmMentionRemovedActionListenerState ||
+                  currentState is IsmEditPostActionListenerState ||
+                  currentState is IsmPostHydratedActionListenerState ||
+                  currentState is IsmUserChangedActionListenerState,
+              listener: (context, state) {
+                // Do Not setState to prevent reels to start from first
+                // this is only to update data to update ui it is done in post_item_widget
+                if (state is IsmDeletedPostActionListenerState &&
+                    state.postId?.isNotEmpty == true) {
+                  _removePostFromList(state.postId!);
+                } else if (state is IsmMentionRemovedActionListenerState) {
+                  _stripSelfMentionFromTimelinePost(state.postId);
+                  if (state.postId.isNotEmpty &&
+                      _tabDataModelList.any(
+                        (tab) =>
+                            tab.tabDataModel.postSectionType ==
+                            PostSectionType.myTaggedPost,
+                      )) {
+                    _removePostFromList(state.postId);
+                  }
+                } else if (state is IsmEditPostActionListenerState &&
+                    state.postData != null) {
+                  _replacePostFromList(state.postData!);
+                } else if (state is IsmPostHydratedActionListenerState &&
+                    state.postData != null) {
+                  _replacePostFromList(state.postData!);
+                } else if (state is IsmUserChangedActionListenerState) {
+                  _onUserChanged(state.userId);
                 }
-              } else if (state is IsmEditPostActionListenerState &&
-                  state.postData != null) {
-                _replacePostFromList(state.postData!);
-              } else if (state is IsmUserChangedActionListenerState) {
-                _onUserChanged(state.userId);
-              }
-            },
-            child: Stack(
-              children: [
-                if (_isCurrentTabPostFeed)
-                  Positioned.fill(
-                    child: ColoredBox(
-                      color:
-                          _postConfig.resolvedPostFeedUIConfig.backgroundColor,
+              },
+              child: Stack(
+                children: [
+                  if (_isCurrentTabPostFeed)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: _postConfig
+                            .resolvedPostFeedUIConfig.backgroundColor,
+                      ),
+                    ),
+                  BlocListener<SocialPostBloc, SocialPostState>(
+                    bloc: _socialPostBloc,
+                    listenWhen: (previousState, currentState) =>
+                        currentState is SocialPostLoadedState ||
+                        currentState is PostLoadingState,
+                    listener: (context, state) {
+                      // ✅ Update _socialPostBloc reference if needed
+                      debugPrint(
+                          'ism_post_view: listener called with state: $state');
+                      if (state is SocialPostLoadedState) {
+                        final tabStateData = _tabDataModelList
+                            .where((_) =>
+                                _.tabDataModel.postSectionType ==
+                                state.postType)
+                            .firstOrNull;
+                        final tabData = tabStateData?.tabDataModel;
+                        if (tabData != null) {
+                          final existing = tabData.reelsDataList;
+                          final incoming = state.postList;
+                          if (existing.isEmpty) {
+                            tabData.reelsDataList = incoming.toList();
+                          } else if (incoming.length >= existing.length) {
+                            tabData.reelsDataList = incoming.toList();
+                          } else {
+                            // Keep paginated items if a late initial load arrives
+                            // with only the first API page.
+                            final existingIds = existing
+                                .map((p) => p.id)
+                                .whereType<String>()
+                                .toSet();
+                            final newOnly = incoming
+                                .where((p) =>
+                                    p.id != null &&
+                                    p.id!.isNotEmpty &&
+                                    !existingIds.contains(p.id))
+                                .toList();
+                            if (newOnly.isNotEmpty) {
+                              tabData.reelsDataList = [
+                                ...newOnly,
+                                ...existing,
+                              ];
+                            }
+                          }
+                          _pinSeededPostFirst(tabData);
+                        }
+                        _mappedReelsByTab.remove(state.postType);
+                        _mappedReelsVersionByTab.remove(state.postType);
+                        tabStateData?.isLoading = false;
+                        if (mounted) setState(() {});
+                      } else if (state is PostLoadingState &&
+                          state.postType != null) {
+                        final tabStateData = _tabDataModelList
+                            .where((_) =>
+                                _.tabDataModel.postSectionType ==
+                                state.postType)
+                            .firstOrNull;
+                        tabStateData?.isLoading = true;
+                      }
+                    },
+                    child: DefaultTabController(
+                      length: _tabDataModelList.isListEmptyOrNull
+                          ? 0
+                          : _tabDataModelList.length,
+                      initialIndex: _currentIndex,
+                      child: _buildLazyTabStack(),
                     ),
                   ),
-                BlocListener<SocialPostBloc, SocialPostState>(
-                  bloc: _socialPostBloc,
-                  listenWhen: (previousState, currentState) =>
-                      currentState is SocialPostLoadedState ||
-                      currentState is PostLoadingState,
-                  listener: (context, state) {
-                    // ✅ Update _socialPostBloc reference if needed
-                    debugPrint(
-                        'ism_post_view: listener called with state: $state');
-                    if (state is SocialPostLoadedState) {
-                      final tabStateData = _tabDataModelList
-                          .where((_) =>
-                              _.tabDataModel.postSectionType == state.postType)
-                          .firstOrNull;
-                      final tabData = tabStateData?.tabDataModel;
-                      if (tabData != null) {
-                        final existing = tabData.reelsDataList;
-                        final incoming = state.postList;
-                        if (existing.isEmpty) {
-                          tabData.reelsDataList = incoming.toList();
-                        } else if (incoming.length >= existing.length) {
-                          tabData.reelsDataList = incoming.toList();
-                        } else {
-                          // Keep paginated items if a late initial load arrives
-                          // with only the first API page.
-                          final existingIds = existing
-                              .map((p) => p.id)
-                              .whereType<String>()
-                              .toSet();
-                          final newOnly = incoming
-                              .where((p) =>
-                                  p.id != null &&
-                                  p.id!.isNotEmpty &&
-                                  !existingIds.contains(p.id))
-                              .toList();
-                          if (newOnly.isNotEmpty) {
-                            tabData.reelsDataList = [
-                              ...newOnly,
-                              ...existing,
-                            ];
-                          }
-                        }
-                        _pinSeededPostFirst(tabData);
-                      }
-                      _mappedReelsByTab.remove(state.postType);
-                      _mappedReelsVersionByTab.remove(state.postType);
-                      tabStateData?.isLoading = false;
-                      if (mounted) setState(() {});
-                    } else if (state is PostLoadingState &&
-                        state.postType != null) {
-                      final tabStateData = _tabDataModelList
-                          .where((_) =>
-                              _.tabDataModel.postSectionType == state.postType)
-                          .firstOrNull;
-                      tabStateData?.isLoading = true;
-                    }
-                  },
-                  child: DefaultTabController(
-                    length: _tabDataModelList.isListEmptyOrNull
-                        ? 0
-                        : _tabDataModelList.length,
-                    initialIndex: _currentIndex,
-                    child: _buildLazyTabStack(),
-                  ),
-                ),
-                if (_tabDataModelList.length > 1) ...[
-                  _buildTabBar()
-                ] else if (_isCurrentTabPostFeed)
-                  _buildPostFeedHeader()
-                else ...[
-                  _buildSingleTabTopBar()
+                  if (_tabDataModelList.length > 1) ...[
+                    _buildTabBar()
+                  ] else if (_isCurrentTabPostFeed)
+                    _buildPostFeedHeader()
+                  else ...[
+                    _buildSingleTabTopBar()
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
         ),
       );
 
@@ -740,6 +814,11 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
             post.isLocked,
             post.lockReason,
             post.media?.length ?? 0,
+            post.caption,
+            post.tags?.mentions?.length ?? 0,
+            post.tags?.places?.length ?? 0,
+            post.tags?.places?.firstOrNull?.placeId,
+            post.tags?.mentions?.map((mention) => mention.userId).join(','),
           ),
         ),
       ),
@@ -915,7 +994,12 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
             return null;
           }
         }
-        if (reelData.postData is TimeLineData) {
+        var isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
+        if (!isUserLoggedIn) {
+          await _socialConfig.socialCallBackConfig?.onLoginInvoked?.call();
+        }
+        isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
+        if (isUserLoggedIn && reelData.postData is TimeLineData) {
           _emitScopedPlayPause(tabData.postSectionType, play: false);
           final res = await _showMentionList(
             mentionList,
@@ -965,12 +1049,11 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
         final postId = reelsData.postId;
         if (postId == null || postId.isEmpty) return;
         _emitScopedPlayPause(tabData.postSectionType, play: false);
-        final postData =
-            await _socialActionCubit.getAsyncPostById(postId) ??
-                ((reelsData.postData is TimeLineData &&
-                        (reelsData.postData as TimeLineData).id == postId)
-                    ? reelsData.postData as TimeLineData
-                    : null);
+        final postData = await _socialActionCubit.getAsyncPostById(postId) ??
+            ((reelsData.postData is TimeLineData &&
+                    (reelsData.postData as TimeLineData).id == postId)
+                ? reelsData.postData as TimeLineData
+                : null);
         if (postData == null) {
           _emitScopedPlayPause(tabData.postSectionType, play: true);
           return;
@@ -992,7 +1075,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
           _emitScopedPlayPause(tabData.postSectionType, play: true);
         }
       },
-        onPressLike: _postConfig.postCallBackConfig?.onLikeClick == null
+      onPressLike: _postConfig.postCallBackConfig?.onLikeClick == null
           ? null
           : (reelsData, isLiked) async {
               _emitScopedPlayPause(tabData.postSectionType, play: false);
@@ -1094,6 +1177,9 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     TabStateModel tabState,
   ) async {
     final section = tabState.tabDataModel.postSectionType;
+    if (section == PostSectionType.multiplePost) {
+      return _handleHostLoadMore(tabState);
+    }
     final hasMore = _socialPostBloc.hasMorePagesForTab(section);
     if (!hasMore) {
       return const PostFeedLoadMoreResult(items: [], hasMore: false);
@@ -1165,11 +1251,68 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     }
   }
 
+  Future<PostFeedLoadMoreResult> _handleHostLoadMore(
+    TabStateModel tabState,
+  ) async {
+    final section = tabState.tabDataModel.postSectionType;
+    final onLoadMorePosts = _tabConfig.tabCallBackConfig?.onLoadMorePosts;
+    if (onLoadMorePosts == null || _hostHasMoreByTab[section] == false) {
+      return const PostFeedLoadMoreResult(items: [], hasMore: false);
+    }
+    if (!_postFeedLoadMoreInFlight.add(section)) {
+      return PostFeedLoadMoreResult(
+        items: const [],
+        hasMore: _hostHasMoreByTab[section] ?? true,
+      );
+    }
+    try {
+      final pageItems = await onLoadMorePosts(tabState.tabDataModel);
+      if (pageItems.isEmpty) {
+        _hostHasMoreByTab[section] = false;
+        return const PostFeedLoadMoreResult(items: [], hasMore: false);
+      }
+      final timeline = tabState.tabDataModel.reelsDataList;
+      final List<TimeLineData> toAppend;
+      if (tabState.tabDataModel.allowDuplicatePostInList) {
+        toAppend = pageItems;
+      } else {
+        final existingIds = timeline
+            .map((post) => post.id)
+            .where((id) => id != null && id.isNotEmpty)
+            .toSet();
+        toAppend = pageItems
+            .where((post) =>
+                post.id == null ||
+                post.id!.isEmpty ||
+                !existingIds.contains(post.id))
+            .toList();
+      }
+      if (toAppend.isEmpty) {
+        _hostHasMoreByTab[section] = false;
+        return const PostFeedLoadMoreResult(items: [], hasMore: false);
+      }
+      timeline.addAll(toAppend);
+      _socialActionCubit.updatePostList(toAppend);
+      _mappedReelsByTab.remove(section);
+      _mappedReelsVersionByTab.remove(section);
+      return PostFeedLoadMoreResult(
+        items: toAppend
+            .map((post) => getReelData(post, loggedInUserId: _loggedInUserId))
+            .toList(),
+        hasMore: true,
+      );
+    } catch (e) {
+      debugPrint('Error handling host load more: $e');
+      return const PostFeedLoadMoreResult(items: [], hasMore: false);
+    } finally {
+      _postFeedLoadMoreInFlight.remove(section);
+    }
+  }
+
   // Interaction handlers
   Future<ReelsData?> _handleCreatePost(TabDataModel tabData) async {
     final completer = Completer<ReelsData>();
-    final result =
-        await IsrAppNavigator.goToCreatePostView(context);
+    final result = await IsrAppNavigator.goToCreatePostView(context);
     if (result is TimeLineData) {
       final postDataModel = result;
       final reelsData =
@@ -1405,8 +1548,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
           BlocProvider.value(value: _socialPostBloc),
           BlocProvider.value(
               value: context.getOrCreateBloc<CommentActionCubit>()),
-          BlocProvider.value(
-              value: context.getOrCreateBloc<SearchUserBloc>()),
+          BlocProvider.value(value: context.getOrCreateBloc<SearchUserBloc>()),
         ],
         child: CommentsBottomSheet(
           postId: postId,
@@ -1484,8 +1626,8 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   Future<void> _removeSelfFromPost({required String postId}) async {
     if (postId.isEmpty) return;
 
-    var userId = await IsmInjectionUtils.getUseCase<IsmLocalDataUseCase>()
-        .getUserId();
+    var userId =
+        await IsmInjectionUtils.getUseCase<IsmLocalDataUseCase>().getUserId();
     if (userId.isEmpty) {
       userId = IsmSocialActionCubit.instance().userId;
     }
@@ -1493,8 +1635,7 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
     final confirmed = await Utility.showRemoveMeFromPostConfirmDialog();
     if (confirmed != true) return;
 
-    final apiResult =
-    await IsmInjectionUtils.getUseCase<RemoveMentionUseCase>()
+    final apiResult = await IsmInjectionUtils.getUseCase<RemoveMentionUseCase>()
         .executeRemoveMention(
       isLoading: true,
       postId: postId,
@@ -1545,6 +1686,9 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
 
   /// Handles refresh for user posts
   Future<bool> _handlePostRefresh(TabStateModel tabState) async {
+    if (tabState.tabDataModel.postSectionType == PostSectionType.multiplePost) {
+      return false;
+    }
     final completer = Completer<bool>();
     tabState.isLoading = true;
     _socialPostBloc.add(GetMorePostEvent(
@@ -1671,7 +1815,8 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
         onReportPost: () async {
           var isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
           if (!isUserLoggedIn) {
-            await IsrVideoReelConfig.socialConfig.socialCallBackConfig?.onLoginInvoked
+            await IsrVideoReelConfig
+                .socialConfig.socialCallBackConfig?.onLoginInvoked
                 ?.call();
           }
           isUserLoggedIn = await _socialActionCubit.isUserLoggedIn;
@@ -1699,7 +1844,8 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
           return completer.future;
         },
         onDeletePost: () async {
-          final dialogCallBack = _socialConfig.socialCallBackConfig?.onNegativeDialog;
+          final dialogCallBack =
+              _socialConfig.socialCallBackConfig?.onNegativeDialog;
           if (dialogCallBack != null) {
             await dialogCallBack(
               title: IsrTranslationFile.deletePost,
@@ -1926,7 +2072,10 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
   Future<TimeLineData?> _handleEditPost(TimeLineData postDataModel) async {
     final postData = await IsrAppNavigator.goToEditPostView(context,
         postData: postDataModel);
-    return postData is TimeLineData ? postData : null;
+    if (postData is! TimeLineData) return null;
+    _replacePostFromList(postData);
+    if (mounted) setState(() {});
+    return postData;
   }
 
   void _logReportEvent(TimeLineData postDataModel, String reportReason,
@@ -1989,5 +2138,44 @@ class _PostViewState extends State<IsmPostView> with TickerProviderStateMixin {
       isDismissible: true,
     );
     return updatedSaveStatus != isSavedPost;
+  }
+}
+
+/// Keeps [TabBar] from moving onto a user-dependent tab before login.
+class _LoginGatedTabController extends TabController {
+  _LoginGatedTabController({
+    required super.length,
+    required super.vsync,
+    super.initialIndex,
+    required this.isUserDependentIndex,
+    required this.onBlockedTap,
+  });
+
+  final bool Function(int index) isUserDependentIndex;
+  final void Function(int index) onBlockedTap;
+  var _bypassGate = false;
+
+  /// Index change after login has already been confirmed.
+  void animateToAllowed(
+    int value, {
+    Duration? duration,
+    Curve curve = Curves.ease,
+  }) {
+    _bypassGate = true;
+    animateTo(value, duration: duration, curve: curve);
+    _bypassGate = false;
+  }
+
+  @override
+  void animateTo(
+    int value, {
+    Duration? duration,
+    Curve curve = Curves.ease,
+  }) {
+    if (!_bypassGate && value != index && isUserDependentIndex(value)) {
+      onBlockedTap(value);
+      return;
+    }
+    super.animateTo(value, duration: duration, curve: curve);
   }
 }

@@ -18,6 +18,57 @@ import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:talker/talker.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+/// Host callback for one social API call.
+///
+/// Register it with [IsrVideoReelConfig.registerNetworkLog]. The SDK does not
+/// print the event. Header values are not redacted.
+typedef IsrNetworkLog = void Function(IsrNetworkLogEvent event);
+
+/// One social API call delivered to [IsrNetworkLog].
+///
+/// [headers] is the request header map, unchanged. The host should redact
+/// `Authorization`, `cookie`, and `x-api-key`.
+class IsrNetworkLogEvent {
+  const IsrNetworkLogEvent({
+    required this.method,
+    required this.uri,
+    required this.headers,
+    this.requestBody,
+    this.responseBody,
+    this.statusCode,
+    this.elapsed = Duration.zero,
+    this.error,
+    this.stackTrace,
+  });
+
+  /// HTTP method, such as `GET` or `POST`.
+  final String method;
+
+  /// Request URI, including query parameters.
+  final Uri uri;
+
+  /// Request headers. Not redacted by the SDK.
+  final Map<String, String> headers;
+
+  /// Request payload. Multipart calls pass the field map, not file bytes.
+  final Object? requestBody;
+
+  /// Response body when the call returned a response.
+  final String? responseBody;
+
+  /// HTTP status code when a response was received.
+  final int? statusCode;
+
+  /// Time spent waiting for the response.
+  final Duration elapsed;
+
+  /// Transport failure. Unset when [statusCode] is present.
+  final Object? error;
+
+  /// Stack trace for [error].
+  final StackTrace? stackTrace;
+}
+
 /// SDK configuration and initialization entrypoint.
 ///
 /// Call [initializeSdk] once during app startup (before rendering the SDK UI).
@@ -625,6 +676,49 @@ class IsrVideoReelConfig {
   static void registerTalker(Talker talker) {
     IsmInjectionUtils.unRegister<Talker>();
     IsmInjectionUtils.registerOtherClass<Talker>(() => talker);
+  }
+
+  static IsrNetworkLog? _networkLog;
+
+  /// Registers [log] to observe social API calls.
+  ///
+  /// Pass null to clear the observer. A null observer does no work.
+  /// Exceptions thrown by [log] are ignored.
+  static void registerNetworkLog(IsrNetworkLog? log) => _networkLog = log;
+
+  /// Delivers one API call to the callback from [registerNetworkLog].
+  ///
+  /// Returns immediately when no callback is registered. Header values are
+  /// passed through unchanged. Exceptions thrown by the callback are ignored.
+  static void emitNetworkLog({
+    required String method,
+    required Uri uri,
+    Map<String, String>? headers,
+    Object? requestBody,
+    String? responseBody,
+    int? statusCode,
+    Duration elapsed = Duration.zero,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    final log = _networkLog;
+    if (log == null) return;
+    final event = IsrNetworkLogEvent(
+      method: method,
+      uri: uri,
+      headers: headers ?? const <String, String>{},
+      requestBody: requestBody,
+      responseBody: responseBody,
+      statusCode: statusCode,
+      elapsed: elapsed,
+      error: error,
+      stackTrace: stackTrace,
+    );
+    try {
+      log(event);
+    } catch (_) {
+      // Host logger failures must not fail the request.
+    }
   }
 
   /// Persists [userInfoClass] (if provided) to local storage.

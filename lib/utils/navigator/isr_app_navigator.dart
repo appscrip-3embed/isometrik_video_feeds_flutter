@@ -309,6 +309,8 @@ class IsrAppNavigator {
         return 'Saved';
       case PostSectionType.tagPost:
         return 'Posts';
+      case PostSectionType.multiplePost:
+        return 'Posts';
       default:
         return 'Posts';
     }
@@ -724,6 +726,7 @@ class IsrAppNavigator {
     required TimeLineData postData,
     TransitionType? transitionType,
     bool isRejectedResubmit = false,
+    bool popWithSavedAttributes = false,
   }) async {
     final page = MultiBlocProvider(
       providers: [
@@ -735,6 +738,7 @@ class IsrAppNavigator {
         postData: postData,
         isEditMode: true,
         isRejectedResubmit: isRejectedResubmit,
+        popWithSavedAttributes: popWithSavedAttributes,
       ),
     );
 

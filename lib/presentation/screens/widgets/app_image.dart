@@ -168,7 +168,12 @@ class AppImage extends StatelessWidget {
               fit: fit,
               isProfileImage: isProfileImage,
               placeHolderWidget: placeHolderWidget ??
-                  IsrVideoReelConfig.socialConfig.socialCallBackConfig?.placeHolderGenerator,
+                  ((isProfileImage && name.trim().isNotEmpty)
+                      ? null
+                      : IsrVideoReelConfig
+                          .socialConfig
+                          .socialCallBackConfig
+                          ?.placeHolderGenerator),
               name: name,
               showError: showError,
               placeHolderName: placeHolderName,
@@ -227,7 +232,7 @@ class _File extends StatelessWidget {
       );
 }
 
-class _Network extends StatelessWidget {
+class _Network extends StatefulWidget {
   const _Network(
     this.imageUrl, {
     required this.name,
@@ -263,84 +268,166 @@ class _Network extends StatelessWidget {
   final Color? textColor;
 
   @override
+  State<_Network> createState() => _NetworkState();
+}
+
+class _NetworkState extends State<_Network> {
+  bool _usedOriginalFallback = false;
+
+  @override
+  void didUpdateWidget(covariant _Network oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _usedOriginalFallback = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final fullName = name.isStringEmptyOrNull == false ? name : '';
-    final words = fullName.split(' ');
-    final initials = words.map((word) => word.isNotEmpty ? word[0] : '').join('').toUpperCase();
-    final isOptimizationEnable = imageUrl.contains('https://cdn.trulyfreehome.dev');
+    final fullName = widget.name.isStringEmptyOrNull == false ? widget.name.trim() : '';
+    final words =
+        fullName.split(RegExp(r'\s+')).where((word) => word.isNotEmpty);
+    final initials =
+        words.take(2).map((word) => word[0]).join().toUpperCase();
 
     final cleanedUrl = preserveEmptyPathSegments(
-      imageUrl.trim().replaceAll(RegExp(r'[",]+$'), ''),
+      widget.imageUrl.trim().replaceAll(RegExp(r'[",]+$'), ''),
     );
-    final optimizedImageUrl = IsrAppConstants.isGumletEnable && isOptimizationEnable
-        ? Utility.buildGumletImageUrl(imageUrl: cleanedUrl, width: width, height: height)
-        : cleanedUrl;
+    if (widget.isProfileImage && _isUnusableAvatarUrl(cleanedUrl)) {
+      return _buildNetworkPlaceholder(
+        initials: initials,
+        customPlaceholder: widget.placeHolderWidget?.call(widget.height, widget.width),
+      );
+    }
+    final originalUrl = Utility.resolveOriginalMediaUrl(cleanedUrl);
+    final shouldConvertToGumlet = Utility.isGumletConversionEnabled() &&
+        cleanedUrl.isNotEmpty &&
+        !Utility.isLocalUrl(cleanedUrl) &&
+        !Utility.isVideoMediaUrl(cleanedUrl) &&
+        (Utility.isGcsMediaUrl(originalUrl) ||
+            Utility.isAlreadyGumletUrl(cleanedUrl) ||
+            Utility.findGumletMapping(originalUrl) != null);
+    final optimizedImageUrl = shouldConvertToGumlet
+        ? Utility.buildGumletImageUrl(
+            imageUrl: originalUrl,
+            width: widget.width,
+            height: widget.height,
+          )
+        : originalUrl;
+    final loadUrl =
+        _usedOriginalFallback && originalUrl != optimizedImageUrl ? originalUrl : optimizedImageUrl;
 
     // Check if the URL is an SVG file - CachedNetworkImage doesn't support SVG
     // Handle URLs with query parameters like: .svg?h=200.0q=100
     final urlPath =
-        Uri.tryParse(optimizedImageUrl)?.path.toLowerCase() ?? optimizedImageUrl.toLowerCase();
-    final isSvgUrl = urlPath.endsWith('.svg') || optimizedImageUrl.toLowerCase().contains('.svg?');
+        Uri.tryParse(loadUrl)?.path.toLowerCase() ?? loadUrl.toLowerCase();
+    final isSvgUrl = urlPath.endsWith('.svg') || loadUrl.toLowerCase().contains('.svg?');
     if (isSvgUrl) {
-      return _buildNetworkSvg(optimizedImageUrl, initials);
+      return _buildNetworkSvg(loadUrl, initials);
     }
 
-    final diskCacheKey = cacheKey ?? cleanedUrl;
+    final diskCacheKey = widget.cacheKey ?? originalUrl;
 
     return CachedNetworkImage(
-      width: width,
-      imageUrl: optimizedImageUrl,
-      cacheManager: cacheManager,
-      filterQuality: filterQuality ?? FilterQuality.high,
-      fit: fit ?? BoxFit.cover,
+      width: widget.width,
+      imageUrl: loadUrl,
+      cacheManager: widget.cacheManager,
+      filterQuality: widget.filterQuality ?? FilterQuality.high,
+      fit: widget.fit ?? BoxFit.cover,
       alignment: Alignment.center,
       cacheKey: diskCacheKey,
       useOldImageOnUrlChange: true,
       fadeInDuration:
-          fadeAnimationEnable ?? false ? const Duration(milliseconds: 300) : Duration.zero,
+          widget.fadeAnimationEnable ?? false ? const Duration(milliseconds: 300) : Duration.zero,
       fadeOutDuration:
-          fadeAnimationEnable ?? false ? const Duration(milliseconds: 300) : Duration.zero,
+          widget.fadeAnimationEnable ?? false ? const Duration(milliseconds: 300) : Duration.zero,
       placeholderFadeInDuration: Duration.zero,
       imageBuilder: (_, image) => ClipRRect(
-        borderRadius: borderRadius ?? BorderRadius.zero,
+        borderRadius: widget.borderRadius ?? BorderRadius.zero,
         child: Container(
-          width: width,
-          height: height,
+          width: widget.width,
+          height: widget.height,
           decoration: BoxDecoration(
-            borderRadius: borderRadius,
-            shape: isProfileImage ? BoxShape.circle : BoxShape.rectangle,
-            image: DecorationImage(image: image, fit: fit ?? BoxFit.cover),
+            borderRadius: widget.borderRadius,
+            shape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+            image: DecorationImage(image: image, fit: widget.fit ?? BoxFit.cover),
           ),
         ),
       ),
       placeholder: (context, url) => _buildNetworkPlaceholder(
         initials: initials,
-        customPlaceholder: placeHolderWidget?.call(height, width),
+        customPlaceholder: widget.placeHolderWidget?.call(widget.height, widget.width),
       ),
-      errorWidget: (context, url, error) => _buildNetworkPlaceholder(
-        initials: initials,
-        customPlaceholder: placeHolderWidget?.call(height, width),
-      ),
+      errorWidget: (context, url, error) {
+        if (!_usedOriginalFallback &&
+            originalUrl.isNotEmpty &&
+            originalUrl != loadUrl) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() => _usedOriginalFallback = true);
+            }
+          });
+        }
+        return _buildNetworkPlaceholder(
+          initials: initials,
+          customPlaceholder: widget.placeHolderWidget?.call(widget.height, widget.width),
+        );
+      },
     );
   }
 
+  bool _isUnusableAvatarUrl(String url) {
+    final value = url.trim().toLowerCase();
+    if (value.isEmpty) return true;
+    return value.contains('gravatar.com') ||
+        value.contains('picsum.photos') ||
+        value.contains('unjected.com/defaultpic') ||
+        value.contains('d=identicon');
+  }
+
+  Widget _buildInitialsPlaceholder(String initials) => Container(
+        width: widget.width,
+        height: widget.height,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+          color: const Color(0xFFE5F0FB),
+          borderRadius: widget.isProfileImage ? null : widget.borderRadius,
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(
+              initials,
+              style: IsrStyles.secondaryText14.copyWith(
+                fontWeight: FontWeight.w600,
+                color: IsrColors.appColor,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+            ),
+          ),
+        ),
+      );
+
   /// Builds a network SVG image using SvgPicture.network
   Widget _buildNetworkSvg(String svgUrl, String initials) => ClipRRect(
-        borderRadius: borderRadius ?? BorderRadius.zero,
+        borderRadius: widget.borderRadius ?? BorderRadius.zero,
         child: SvgPicture.network(
           svgUrl,
-          height: height,
-          width: width,
-          fit: fit ?? BoxFit.cover,
-          placeholderBuilder: (context) => showError
+          height: widget.height,
+          width: widget.width,
+          fit: widget.fit ?? BoxFit.cover,
+          placeholderBuilder: (context) => widget.showError
               ? ImagePlaceHolder(
-                  width: width,
-                  height: height,
-                  borderRadius: borderRadius,
-                  placeHolderName: placeHolderName,
-                  boxShape: isProfileImage ? BoxShape.circle : BoxShape.rectangle,
-                  child: placeHolderWidget?.call(height, width) ??
-                      (name.isStringEmptyOrNull == false && isProfileImage
+                  width: widget.width,
+                  height: widget.height,
+                  borderRadius: widget.borderRadius,
+                  placeHolderName: widget.placeHolderName,
+                  boxShape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+                  child: widget.placeHolderWidget?.call(widget.height, widget.width) ??
+                      (widget.name.isStringEmptyOrNull == false && widget.isProfileImage
                           ? Center(
                               child: FittedBox(
                                 fit: BoxFit.scaleDown,
@@ -349,7 +436,7 @@ class _Network extends StatelessWidget {
                                   child: Text(
                                     initials,
                                     style: IsrStyles.secondaryText14
-                                        .copyWith(fontWeight: FontWeight.w500, color: textColor),
+                                        .copyWith(fontWeight: FontWeight.w600, color: IsrColors.appColor),
                                     textAlign: TextAlign.center,
                                     maxLines: 1,
                                   ),
@@ -359,12 +446,12 @@ class _Network extends StatelessWidget {
                           : null),
                 )
               : Container(
-                  width: width,
-                  height: height,
+                  width: widget.width,
+                  height: widget.height,
                   decoration: BoxDecoration(
                     color: Colors.black.changeOpacity(0.3),
-                    borderRadius: borderRadius,
-                    shape: isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+                    borderRadius: widget.borderRadius,
+                    shape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
                   ),
                 ),
         ),
@@ -374,21 +461,24 @@ class _Network extends StatelessWidget {
     required String initials,
     Widget? customPlaceholder,
   }) {
-    if (customPlaceholder != null && showError) {
+    if (widget.isProfileImage && initials.isNotEmpty) {
+      return _buildInitialsPlaceholder(initials);
+    }
+    if (customPlaceholder != null && widget.showError) {
       return SizedBox(
-        width: width,
-        height: height,
+        width: widget.width,
+        height: widget.height,
         child: customPlaceholder,
       );
     }
-    if (showError) {
+    if (widget.showError) {
       return ImagePlaceHolder(
-        width: width,
-        height: height,
-        borderRadius: borderRadius,
-        placeHolderName: placeHolderName,
-        boxShape: isProfileImage ? BoxShape.circle : BoxShape.rectangle,
-        child: name.isStringEmptyOrNull == false && isProfileImage
+        width: widget.width,
+        height: widget.height,
+        borderRadius: widget.borderRadius,
+        placeHolderName: widget.placeHolderName,
+        boxShape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+        child: widget.name.isStringEmptyOrNull == false && widget.isProfileImage
             ? Center(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
@@ -397,8 +487,8 @@ class _Network extends StatelessWidget {
                     child: Text(
                       initials,
                       style: IsrStyles.secondaryText14.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: textColor,
+                        fontWeight: FontWeight.w600,
+                        color: IsrColors.appColor,
                       ),
                       textAlign: TextAlign.center,
                       maxLines: 1,
@@ -410,12 +500,12 @@ class _Network extends StatelessWidget {
       );
     }
     return Container(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       decoration: BoxDecoration(
         color: Colors.black.changeOpacity(0.3),
-        borderRadius: borderRadius,
-        shape: isProfileImage ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: widget.borderRadius,
+        shape: widget.isProfileImage ? BoxShape.circle : BoxShape.rectangle,
       ),
     );
   }

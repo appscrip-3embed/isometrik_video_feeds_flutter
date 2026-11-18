@@ -246,7 +246,7 @@ Config and callbacks are set via **`IsrVideoReelConfig`** (or passed into `initi
 
 | Config                    | Purpose |
 |---------------------------|--------|
-| **`socialConfig`**        | Theme, toasts, dialogs, buttons, fonts, colors; app-wide loader override via `loaderBuilder`; optional **`GoogleCloudUpload`** (`credentialsJsonPath`, `bucketName`); **SocialCallBackConfig**: `onLoginInvoked`, optional `uploadMediaToCloud`, `convertToGumletUrl`. |
+| **`socialConfig`**        | Theme, toasts, dialogs, buttons, fonts, colors; app-wide loader override via `loaderBuilder`; optional **`GoogleCloudUpload`**; optional **`gumletMappings`** (SDK-owned convert/revert); **SocialCallBackConfig**: `onLoginInvoked`, optional `uploadMediaToCloud`, `convertToGumletUrl`, `revertGumletUrl`. |
 | **`postConfig`**          | Post UI (overlay, actions, media indicator, profile, description, location, shop, follow button); **PostCallBackConfig**: save/like/follow/share/comment/profile/tag-product/post-changed. |
 | **`tabConfig`**           | Tab bar, back button, loading, status bar; **TabCallBackConfig**: `onChangeOfTab`, `onReelsLoaded`, `getEmptyScreen`. |
 | **`commentConfig`**       | Comment bottom sheet, header, item, reply field, placeholder, more options. |
@@ -256,7 +256,7 @@ Config and callbacks are set via **`IsrVideoReelConfig`** (or passed into `initi
 
 ### Key callbacks (summary)
 
-- **SocialCallBackConfig**: `onLoginInvoked` → `Future<bool>` (login success/failure); optional `uploadMediaToCloud` (host upload); optional `convertToGumletUrl` (raw URL → Gumlet URL).
+- **SocialCallBackConfig**: `onLoginInvoked` → `Future<bool>` (login success/failure); optional `uploadMediaToCloud` (host upload); optional `convertToGumletUrl` / `revertGumletUrl` (host-owned Gumlet convert/revert — callbacks win over `SocialConfig.gumletMappings`). If callbacks are omitted, pass `gumletMappings` so the SDK prefix-swaps both ways. Persist the original upload URL; convert at display. On Gumlet 404, images/videos retry the original URL once. Legacy 1-arg hosts can use `wrapConvertToGumletUrl`.
 - **PostCallBackConfig**: `onSaveChanged`, `onLikeChanged`, `onSaveClicked`, `onLikeClick`, `onFollowClick`, `onShareClicked`, `onCommentClick`, `onProfileClick`, `onTagProductClick`, `onPostChanged`.
 - **TabCallBackConfig**: `onChangeOfTab`, `onReelsLoaded`, `getEmptyScreen`.
 - **CreateEditPostCallBackConfig**: `onLinkProduct`, `onAddPostLink` (optional custom link picker).
@@ -264,12 +264,12 @@ Config and callbacks are set via **`IsrVideoReelConfig`** (or passed into `initi
 
 ### Google Cloud upload (`GoogleCloudUpload`)
 
-Optional on **`SocialConfig`**. Supply the filesystem path to your Google Cloud **service account JSON** key file and the **GCS bucket** name:
+Optional on **`SocialConfig`**. Prefer passing the Google Cloud **service account JSON** as a string (`credentialsJson`) so the key is not bundled as a Flutter asset. `credentialsJsonPath` remains as a deprecated fallback. If both are set, JSON wins.
 
 ```dart
 socialConfig: SocialConfig(
   googleCloudUpload: GoogleCloudUpload(
-    credentialsJsonPath: '/path/to/service-account.json',
+    credentialsJson: serviceAccountJsonString,
     bucketName: 'your-gcs-bucket',
   ),
   // ... theme, callbacks, etc.
@@ -278,7 +278,8 @@ socialConfig: SocialConfig(
 
 | Field | Description |
 |-------|-------------|
-| `credentialsJsonPath` | Path to the service account credentials JSON file. |
+| `credentialsJson` | Service account JSON body (preferred). |
+| `credentialsJsonPath` | Deprecated asset path to the credentials JSON. Used only when `credentialsJson` is empty. |
 | `bucketName` | Target Google Cloud Storage bucket name. |
 
 You can customize each config’s sub-properties (e.g. `ThemeConfig`, `ToastConfig`, `ButtonConfig`, `GoogleCloudUpload`, `PostUIConfig`, etc.) as needed; see the respective model classes in the SDK for full options.
