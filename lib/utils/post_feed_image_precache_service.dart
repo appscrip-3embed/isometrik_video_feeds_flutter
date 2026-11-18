@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/utils/feed_media_orientation.dart';
+import 'package:ism_video_reel_player/utils/media_url_util.dart';
 
 /// Disk cache for post-feed still frames (images + video thumbnails only).
 class IsrPostFeedImageCacheManager {
@@ -75,9 +76,14 @@ class PostFeedImagePrecacheService {
   }
 
   Future<void> precacheUrls(
-    List<String> urls, {
+    List<String> rawUrls, {
     BuildContext? context,
   }) async {
+    // Normalize once so cache keys match AppImage, which uses the same function.
+    final urls = rawUrls
+        .map(preserveEmptyPathSegments)
+        .where((url) => url.isNotEmpty)
+        .toList(growable: false);
     if (urls.isEmpty) return;
 
     final generation = _generation;

@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
+import 'package:ism_video_reel_player/utils/media_url_util.dart';
 import 'package:video_player/video_player.dart';
 
 class StoryViewerMediaContent extends StatelessWidget {
@@ -56,7 +57,7 @@ class StoryViewerMediaContent extends StatelessWidget {
       );
     }
 
-    final url = current.mediaUrl.trim();
+    final url = preserveEmptyPathSegments(current.mediaUrl);
     if (url.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }

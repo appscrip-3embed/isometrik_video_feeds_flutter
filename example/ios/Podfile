@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-platform :ios, '14.0'
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -93,11 +93,23 @@ def patch_deepar_simulator_embed_script
   File.write(script, contents.gsub(device, replacement))
 end
 
+# Xcode 26 rejects simulator targets below iOS 15. Podspecs still request 9–14.
+def raise_ios_deployment_target(config)
+  current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+  return if current && current.to_f >= 15.0
+
+  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+end
+
 post_install do |installer|
   build_deepar_simulator_stub
+  installer.pods_project.build_configurations.each do |config|
+    raise_ios_deployment_target(config)
+  end
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
+      raise_ios_deployment_target(config)
       prepend_deepar_simulator_stub(config)
     end
   end

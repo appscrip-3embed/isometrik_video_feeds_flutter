@@ -43,7 +43,7 @@ cat > "${OUT_DIR}/Info.plist" <<'EOF'
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>MinimumOSVersion</key>
-  <string>14.0</string>
+  <string>15.0</string>
 </dict>
 </plist>
 EOF

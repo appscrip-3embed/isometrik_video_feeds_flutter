@@ -269,7 +269,9 @@ class _Network extends StatelessWidget {
     final initials = words.map((word) => word.isNotEmpty ? word[0] : '').join('').toUpperCase();
     final isOptimizationEnable = imageUrl.contains('https://cdn.trulyfreehome.dev');
 
-    final cleanedUrl = imageUrl.trim().replaceAll(RegExp(r'[",]+$'), '');
+    final cleanedUrl = preserveEmptyPathSegments(
+      imageUrl.trim().replaceAll(RegExp(r'[",]+$'), ''),
+    );
     final optimizedImageUrl = IsrAppConstants.isGumletEnable && isOptimizationEnable
         ? Utility.buildGumletImageUrl(imageUrl: cleanedUrl, width: width, height: height)
         : cleanedUrl;
