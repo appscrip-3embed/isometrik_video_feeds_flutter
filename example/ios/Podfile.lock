@@ -240,7 +240,7 @@ SPEC CHECKSUMS:
   pro_image_editor: e57a76b305fd8c2e06d57f92aec82b9c6a6e8d9f
   pro_video_editor: 71c273c0a82a72996526e2bfc5c2fbd2bb35aaaa
   Rudder: f1d27148fe70e0d371aec933ac9381f8e97276dc
-  rudder_plugin_ios: cefae09008c881e729fcfe8ba64fabb23b85f8e8
+  rudder_plugin_ios: 521938acf53fe40663aa837ca2ab99701a0517fa
   SDWebImage: 9f177d83116802728e122410fb25ad88f5c7608a
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
@@ -251,6 +251,6 @@ SPEC CHECKSUMS:
   video_player_avfoundation: 3453f792138786248960ca029747fcd9f318ef52
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
 
-PODFILE CHECKSUM: fc80ba62d17421e0bed671fbbea923ca3e3a6dfc
+PODFILE CHECKSUM: 3f1c2e2c87b2801232eddc3367077cf834cf9668
 
 COCOAPODS: 1.16.2
