@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:ism_video_reel_player/ism_video_reel_player.dart';
+import 'package:ism_video_reel_player/utils/media_url_util.dart';
 import 'package:ism_video_reel_player/utils/utility.dart';
 
 /// Cache manager implementation for images
@@ -235,12 +236,15 @@ class ImageCacheManager implements IMediaCacheManager {
     final noQuery = trimmed.split('?').first;
     final noFragment = noQuery.split('#').first;
 
+    // Keep empty path segments (folder//file) alive on iOS, see preserveEmptyPathSegments.
+    final keepSegments = preserveEmptyPathSegments(noFragment);
+
     // If already a valid URI, keep its normalized string form.
     try {
-      return Uri.parse(noFragment).toString();
+      return Uri.parse(keepSegments).toString();
     } catch (_) {
       // Fall back to a safe encoding for common invalid URLs (spaces, etc.).
-      return Uri.encodeFull(noFragment);
+      return Uri.encodeFull(keepSegments);
     }
   }
 }

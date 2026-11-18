@@ -378,7 +378,10 @@ class Utility {
   /// precache images
   static void preCacheImages(List<String> imageUrls, BuildContext context) {
     for (final url in imageUrls) {
-      precacheImage(CachedNetworkImageProvider(url), context);
+      precacheImage(
+        CachedNetworkImageProvider(preserveEmptyPathSegments(url)),
+        context,
+      );
     }
   }
 

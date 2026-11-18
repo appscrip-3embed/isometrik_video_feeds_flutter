@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/isr_video_reel_config.dart';
+import 'package:ism_video_reel_player/utils/media_url_util.dart';
 
 enum PostFeedMediaOrientation {
   portrait,
@@ -433,7 +434,7 @@ abstract final class FeedMediaOrientation {
 
   static Future<Uint8List> _downloadBytes(String url, int maxBytes) async {
     final response = await http.get(
-      Uri.parse(url),
+      Uri.parse(preserveEmptyPathSegments(url)),
       headers: {'Range': 'bytes=0-${maxBytes - 1}'},
     ).timeout(_requestTimeout);
 

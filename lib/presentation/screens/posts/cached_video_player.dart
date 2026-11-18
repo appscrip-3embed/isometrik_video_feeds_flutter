@@ -252,7 +252,7 @@ class CachedVideoCacheManager implements IVideoCacheManager {
       );
     }
 
-    var url = mediaUrl;
+    var url = preserveEmptyPathSegments(mediaUrl);
     if (url.startsWith('http:')) {
       url = url.replaceFirst('http:', 'https:');
     }
