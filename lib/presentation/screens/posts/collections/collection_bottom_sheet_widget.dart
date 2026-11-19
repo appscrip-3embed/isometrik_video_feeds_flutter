@@ -113,18 +113,16 @@ class _CollectionBottomSheetWidgetState
 
   void _handleDonePress() {
     final currentSelection = selectedCollectionNotifier.value;
-    final collectionIdsToAdd = currentSelection
-        .difference(_initialSelectedCollectionIds)
-        .toList();
-    final removeCollectionIds = _initialSelectedCollectionIds
-        .difference(currentSelection)
-        .toList();
+    final collectionIdsToAdd =
+        currentSelection.difference(_initialSelectedCollectionIds).toList();
+    final removeCollectionIds =
+        _initialSelectedCollectionIds.difference(currentSelection).toList();
 
     if (collectionIdsToAdd.isEmpty && removeCollectionIds.isEmpty) return;
 
     _collectionBloc.add(MoveToCollectionEvent(
       postId: widget.postId,
-      collectionIds: collectionIdsToAdd,
+      collectionId: collectionIdsToAdd.first,
       removeCollectionIds: removeCollectionIds,
       onMoveToCollection: () {
         _initialSelectedCollectionIds =
@@ -444,8 +442,7 @@ class _CollectionBottomSheetWidgetState
           borderRadius: IsrDimens.borderRadiusAll(IsrDimens.four),
         ),
         onChanged: null,
-        fillColor:
-            WidgetStateProperty.all(CollectionThemeResolver.surfaceCard),
+        fillColor: WidgetStateProperty.all(CollectionThemeResolver.surfaceCard),
         side: BorderSide(
           color: CollectionThemeResolver.border,
           width: IsrDimens.two,
@@ -593,8 +590,7 @@ class _CollectionBottomSheetWidgetState
                                         IsrDimens.edgeInsetsAll(IsrDimens.four),
                                     child: CircularProgressIndicator.adaptive(
                                       strokeWidth: IsrDimens.two,
-                                      valueColor:
-                                          AlwaysStoppedAnimation<Color>(
+                                      valueColor: AlwaysStoppedAnimation<Color>(
                                         IsrColors.appColor,
                                       ),
                                     ),

@@ -35,12 +35,12 @@ class ModifyUserCollectionEvent extends CollectionEvent {
 
 class MoveToCollectionEvent extends CollectionEvent {
   MoveToCollectionEvent({
-    this.collectionIds = const [],
+    this.collectionId = '',
     this.removeCollectionIds = const [],
     this.postId = '',
     this.onMoveToCollection,
   });
-  final List<String> collectionIds;
+  final String collectionId;
   final List<String> removeCollectionIds;
   final String postId;
   final VoidCallback? onMoveToCollection;

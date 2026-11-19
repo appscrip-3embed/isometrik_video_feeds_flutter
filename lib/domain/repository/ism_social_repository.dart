@@ -33,13 +33,15 @@ abstract class SocialRepository extends BaseRepository {
     required FollowAction followAction,
   });
 
-  Future<CustomResponse<FollowRequestsListResponse?>> getFollowRequestsIncoming({
+  Future<CustomResponse<FollowRequestsListResponse?>>
+      getFollowRequestsIncoming({
     required bool isLoading,
     required int page,
     required int pageSize,
   });
 
-  Future<CustomResponse<FollowRequestsListResponse?>> getFollowRequestsOutgoing({
+  Future<CustomResponse<FollowRequestsListResponse?>>
+      getFollowRequestsOutgoing({
     required bool isLoading,
     required int page,
     required int pageSize,
@@ -287,7 +289,7 @@ abstract class SocialRepository extends BaseRepository {
   Future<CustomResponse<ResponseClass?>> movePostToCollection({
     required bool isLoading,
     required String postId,
-    required List<String> collectionIds,
+    required String collectionId,
     required List<String> removeCollectionIds,
   });
 

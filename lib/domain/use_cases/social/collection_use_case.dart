@@ -45,14 +45,14 @@ class CollectionUseCase extends BaseUseCase {
   Future<ApiResult<ResponseClass?>> executeMoveToCollection({
     required bool isLoading,
     required String postId,
-    required List<String> collectionIds,
+    required String collectionId,
     List<String> removeCollectionIds = const [],
   }) async =>
       await super.execute(() async {
         final response = await _repository.movePostToCollection(
           isLoading: isLoading,
           postId: postId,
-          collectionIds: collectionIds,
+          collectionId: collectionId,
           removeCollectionIds: removeCollectionIds,
         );
         return ApiResult(

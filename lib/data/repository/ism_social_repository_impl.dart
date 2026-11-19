@@ -6,7 +6,8 @@ import 'package:ism_video_reel_player/remote/remote.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 
 class SocialRepositoryImpl implements SocialRepository {
-  SocialRepositoryImpl(this._apiService, this._dataSource, this._localDataUseCase);
+  SocialRepositoryImpl(
+      this._apiService, this._dataSource, this._localDataUseCase);
 
   final SocialApiService _apiService;
   final DataSource _dataSource;
@@ -115,7 +116,8 @@ class SocialRepositoryImpl implements SocialRepository {
   }
 
   @override
-  Future<CustomResponse<FollowRequestsListResponse?>> getFollowRequestsIncoming({
+  Future<CustomResponse<FollowRequestsListResponse?>>
+      getFollowRequestsIncoming({
     required bool isLoading,
     required int page,
     required int pageSize,
@@ -135,7 +137,8 @@ class SocialRepositoryImpl implements SocialRepository {
   }
 
   @override
-  Future<CustomResponse<FollowRequestsListResponse?>> getFollowRequestsOutgoing({
+  Future<CustomResponse<FollowRequestsListResponse?>>
+      getFollowRequestsOutgoing({
     required bool isLoading,
     required int page,
     required int pageSize,
@@ -934,7 +937,7 @@ class SocialRepositoryImpl implements SocialRepository {
   Future<CustomResponse<ResponseClass?>> movePostToCollection({
     required bool isLoading,
     required String postId,
-    required List<String> collectionIds,
+    required String collectionId,
     required List<String> removeCollectionIds,
   }) async {
     try {
@@ -943,7 +946,7 @@ class SocialRepositoryImpl implements SocialRepository {
         isLoading: isLoading,
         header: header,
         postId: postId,
-        collectionIds: collectionIds,
+        collectionId: collectionId,
         removeCollectionIds: removeCollectionIds,
       );
       return _mapper.mapResponseData(response);
@@ -1008,8 +1011,8 @@ class SocialRepositoryImpl implements SocialRepository {
     }
   }
 
-  Future<CustomResponse<TimelineResponse?>> _mapTimelineResponseWithLocalActions(
-      ResponseModel response) async {
+  Future<CustomResponse<TimelineResponse?>>
+      _mapTimelineResponseWithLocalActions(ResponseModel response) async {
     final viewerId = await _getViewerId();
     final mappedResponse = _socialMapper.mapTimelineResponse(response);
     _applyLocalActionsToPosts(
@@ -1020,8 +1023,7 @@ class SocialRepositoryImpl implements SocialRepository {
   }
 
   Future<CustomResponse<TimelineDataResponse?>>
-      _mapTimelineDataResponseWithLocalActions(
-      ResponseModel response) async {
+      _mapTimelineDataResponseWithLocalActions(ResponseModel response) async {
     final viewerId = await _getViewerId();
     final mappedResponse = _socialMapper.mapTimelineDataResponse(response);
     _applyLocalActionsToPosts(
@@ -1166,8 +1168,7 @@ class SocialRepositoryImpl implements SocialRepository {
   }
 
   Future<CustomResponse<SearchUserResponse?>>
-      _mapSearchUserResponseWithLocalActions(
-      ResponseModel response) async {
+      _mapSearchUserResponseWithLocalActions(ResponseModel response) async {
     final viewerId = await _getViewerId();
     final mappedResponse = _socialMapper.mapSearchUserResponse(response);
     for (final user in mappedResponse.data?.data ?? <SocialUserData>[]) {

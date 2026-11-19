@@ -221,7 +221,7 @@ class IsmDataProvider {
   /// Move post to collection
   Future<void> movePostToCollection({
     required String postId,
-    required List<String> collectionIds,
+    required String collectionId,
     List<String> removeCollectionIds = const [],
     bool isLoading = false,
     Function(String, int)? onSuccess,
@@ -231,7 +231,7 @@ class IsmDataProvider {
       apiCall: () => _collectionUseCase.executeMoveToCollection(
         isLoading: isLoading,
         postId: postId,
-        collectionIds: collectionIds,
+        collectionId: collectionId,
         removeCollectionIds: removeCollectionIds,
       ),
       toJson: (data) => data?.toMap() ?? {},

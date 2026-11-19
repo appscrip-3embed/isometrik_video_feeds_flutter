@@ -329,7 +329,7 @@ abstract class SocialApiService extends BaseService {
     required bool isLoading,
     required Header header,
     required String postId,
-    required List<String> collectionIds,
+    required String collectionId,
     required List<String> removeCollectionIds,
   });
 
