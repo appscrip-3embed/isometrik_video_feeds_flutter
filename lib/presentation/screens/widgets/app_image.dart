@@ -582,17 +582,22 @@ class _Svg extends StatelessWidget {
   final String? package;
 
   @override
-  Widget build(BuildContext context) => SvgPicture.asset(
-        path,
-        height: height,
-        width: width,
-        fit: fit ?? BoxFit.contain,
-        package: package,
-        colorFilter: color != null
-            ? ColorFilter.mode(
-                color!,
-                blendMode ?? BlendMode.srcIn,
-              )
-            : null,
-      );
+  Widget build(BuildContext context) {
+    final ({String path, String? package}) resolved = package != null
+        ? (path: path, package: package)
+        : AssetConstants.resolveAsset(path);
+    return SvgPicture.asset(
+      resolved.path,
+      height: height,
+      width: width,
+      fit: fit ?? BoxFit.contain,
+      package: resolved.package,
+      colorFilter: color != null
+          ? ColorFilter.mode(
+              color!,
+              blendMode ?? BlendMode.srcIn,
+            )
+          : null,
+    );
+  }
 }

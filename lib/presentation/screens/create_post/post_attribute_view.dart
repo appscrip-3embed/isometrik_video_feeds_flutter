@@ -2276,7 +2276,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   }
 
   final mediaSelectionConfig =
-      CreatePostFlowCoordinator.defaultMediaSelectionConfig();
+      CreatePostFlowCoordinator.resolvedMediaSelectionConfig();
 
   Future<dynamic> _captureMedia(String? mediaType) async =>
       await Navigator.of(context, rootNavigator: true).push<dynamic>(
