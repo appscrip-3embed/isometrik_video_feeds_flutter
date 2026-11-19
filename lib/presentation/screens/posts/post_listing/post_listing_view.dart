@@ -1526,7 +1526,11 @@ class _PostListingViewState extends State<PostListingView> {
                 width: _searchScreenUIConfig?.postCardConfig
                         ?.userProfileOverlayConfig?.avatarSize ??
                     20.responsiveDimension,
-                name: post.user?.fullName ?? '',
+                name: Utility.profileAvatarName(
+                  displayName: post.user?.displayName,
+                  fullName: post.user?.fullName,
+                  username: post.user?.username,
+                ),
                 isProfileImage: true,
                 textColor: _searchScreenUIConfig
                         ?.postCardConfig?.userProfileOverlayConfig?.textColor ??

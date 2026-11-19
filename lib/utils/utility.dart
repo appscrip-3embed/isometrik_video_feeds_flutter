@@ -1102,6 +1102,49 @@ class Utility {
     return '${firstName[0].toUpperCase()}${lastName[0].toUpperCase()}';
   }
 
+  /// Display label for [AppImage.network] when [avatar_url] is null.
+  /// Prefer display name, then full name, then username (e.g. `xen` → initial "X").
+  static String profileAvatarName({
+    String? displayName,
+    String? fullName,
+    String? username,
+  }) {
+    for (final candidate in [displayName, fullName, username]) {
+      final trimmed = candidate?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+    }
+    return '';
+  }
+
+  /// Initials for profile placeholders when there is no photo.
+  static String profileInitialsFromFields({
+    String? displayName,
+    String? fullName,
+    String? username,
+    String? firstName,
+    String? lastName,
+  }) {
+    final fromParts = getInitials(
+      firstName: firstName ?? '',
+      lastName: lastName ?? '',
+    );
+    if (fromParts.isNotEmpty) return fromParts;
+
+    final label = profileAvatarName(
+      displayName: displayName,
+      fullName: fullName,
+      username: username,
+    );
+    if (label.isEmpty) return '';
+
+    final words =
+        label.split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
+    if (words.length >= 2) {
+      return '${words.first[0]}${words.last[0]}'.toUpperCase();
+    }
+    return words.first[0].toUpperCase();
+  }
+
   /// Regex for detecting http(s) and www URLs in caption/comment text.
   static final RegExp captionUrlRegex = RegExp(r'(https?:\/\/\S+|www\.\S+)', caseSensitive: false);
 

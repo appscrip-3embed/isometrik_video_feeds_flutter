@@ -1311,6 +1311,31 @@ List<MediaMetaData> reelMediaMetaDataFromTimeline(TimeLineData postData) {
   return [];
 }
 
+String _timelineUserFirstName(SocialUserData? user) {
+  if (user == null) return '';
+  for (final source in [user.displayName, user.fullName]) {
+    final trimmed = source?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      return trimmed.split(RegExp(r'\s+')).first;
+    }
+  }
+  return user.username ?? '';
+}
+
+String _timelineUserLastName(SocialUserData? user) {
+  if (user == null) return '';
+  for (final source in [user.displayName, user.fullName]) {
+    final trimmed = source?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      final parts =
+          trimmed.split(RegExp(r'\s+')).where((part) => part.isNotEmpty).toList();
+      if (parts.length > 1) return parts.last;
+      return '';
+    }
+  }
+  return '';
+}
+
 ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
     ReelsData(
       postData: postData,
@@ -1349,12 +1374,8 @@ ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
       userId: postData.user?.id ?? '',
       userName: postData.user?.username ?? '',
       profilePhoto: postData.user?.avatarUrl ?? '',
-      firstName: postData.user?.displayName?.split(' ').firstOrNull ?? '',
-      lastName: postData.user?.displayName
-              ?.split(' ')
-              .takeIf((_) => _.length > 1)
-              ?.lastOrNull ??
-          '',
+      firstName: _timelineUserFirstName(postData.user),
+      lastName: _timelineUserLastName(postData.user),
       likesCount: postData.engagementMetrics?.likeTypes?.like?.toInt() ?? 0,
       viewCount: postData.engagementMetrics?.views?.toInt() ?? 0,
       commentCount: postData.engagementMetrics?.comments?.toInt() ?? 0,

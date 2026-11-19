@@ -2777,7 +2777,11 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                                               ?.profileImagePlaceholderColor ??
                                           IsrColors.white,
                                       name:
-                                          '${_reelData.firstName ?? ''} ${_reelData.lastName ?? ''}',
+                                          '${_reelData.firstName ?? ''} ${_reelData.lastName ?? ''}'
+                                              .trim()
+                                              .takeIfNotEmpty() ??
+                                          _reelData.userName ??
+                                          '',
                                     ),
                                   ),
                                 ),
