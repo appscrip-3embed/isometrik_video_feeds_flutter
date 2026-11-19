@@ -174,6 +174,7 @@ class TimeLineData {
     this.allowDownload,
     this.rejectionReason,
     this.rejectedAt,
+    this.isDataIncomplete = false,
   });
 
   factory TimeLineData.fromMap(Map<String, dynamic> json) => TimeLineData(
@@ -213,6 +214,7 @@ class TimeLineData {
             json.stringOrNull('rejectionReason'),
         rejectedAt:
             json.stringOrNull('rejected_at') ?? json.stringOrNull('rejectedAt'),
+        isDataIncomplete: json.getBool('is_data_incomplete'),
       );
   dynamic textFormatting;
   String? publishedAt;
@@ -243,6 +245,9 @@ class TimeLineData {
   bool? allowDownload;
   String? rejectionReason;
   String? rejectedAt;
+
+  /// Host-seeded partial payload. When true the SDK fetches post details.
+  bool isDataIncomplete;
 
   Map<String, dynamic> toMap() => {
         'text_formatting': textFormatting,
@@ -280,6 +285,7 @@ class TimeLineData {
         if (allowDownload != null) 'allow_download': allowDownload,
         'rejection_reason': rejectionReason,
         'rejected_at': rejectedAt,
+        'is_data_incomplete': isDataIncomplete,
       };
 
   TimeLineData copyWith({
@@ -311,6 +317,7 @@ class TimeLineData {
     String? lockReason,
     String? rejectionReason,
     String? rejectedAt,
+    bool? isDataIncomplete,
   }) =>
       TimeLineData(
         textFormatting: textFormatting ?? this.textFormatting,
@@ -340,6 +347,7 @@ class TimeLineData {
         lockReason: lockReason ?? this.lockReason,
         rejectionReason: rejectionReason ?? this.rejectionReason,
         rejectedAt: rejectedAt ?? this.rejectedAt,
+        isDataIncomplete: isDataIncomplete ?? this.isDataIncomplete,
       )..isFromLocal = isFromLocal ?? this.isFromLocal;
 }
 
@@ -781,7 +789,8 @@ class Tags {
         mentions: _parseObjectList(json, 'mentions', MentionData.fromJson),
         hashtags: _parseObjectList(json, 'hashtags', MentionData.fromJson),
         places: _parseObjectList(json, 'places', TaggedPlace.fromJson),
-        products: _parseObjectList(json, 'products', SocialProductData.fromJson),
+        products:
+            _parseObjectList(json, 'products', SocialProductData.fromJson),
         links: _parsePostLinks(json['links']),
       );
   List<MentionData>? mentions;
@@ -814,8 +823,9 @@ class Tags {
         'hashtags': hashtags == null
             ? []
             : List<dynamic>.from(hashtags!.map((x) => x.toJson())),
-        'places':
-            places == null ? [] : List<dynamic>.from(places!.map((x) => x)),
+        'places': places == null
+            ? []
+            : List<dynamic>.from(places!.map((x) => x.toJson())),
         'products': products == null
             ? []
             : List<dynamic>.from(products!.map((x) => x.toJson())),
@@ -891,8 +901,7 @@ class SocialUserData {
   bool? isRequested;
   String? verificationStatus;
 
-  bool get isVerified =>
-      verificationStatus?.toLowerCase() == 'verified';
+  bool get isVerified => verificationStatus?.toLowerCase() == 'verified';
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -956,16 +965,40 @@ class MentionData {
     this.mediaPosition,
   });
 
-  factory MentionData.fromJson(Map<String, dynamic> json) => MentionData(
-        userId: json.getString('user_id'),
-        username: json.getString('username'),
-        tag: json.getString('tag'),
-        name: json.getString('name'),
-        avatarUrl: json.getString('avatarUrl'),
-        textPosition: json.objectOrNull('text_position', TaggedPosition.fromJson),
-        mediaPosition:
-            json.objectOrNull('media_position', MediaPosition.fromJson),
-      );
+  factory MentionData.fromJson(Map<String, dynamic> json) {
+    final user = json.mapOrNull('user');
+    return MentionData(
+      userId: _firstFilled([
+        json.stringOrNull('user_id'),
+        json.stringOrNull('userId'),
+        user?.stringOrNull('id'),
+        user?.stringOrNull('user_id'),
+      ]),
+      username: _firstFilled([
+        json.stringOrNull('username'),
+        user?.stringOrNull('username'),
+      ]),
+      tag: _firstFilled([json.stringOrNull('tag')]),
+      name: _firstFilled([
+        json.stringOrNull('name'),
+        json.stringOrNull('full_name'),
+        json.stringOrNull('display_name'),
+        json.stringOrNull('fullName'),
+        user?.stringOrNull('full_name'),
+        user?.stringOrNull('display_name'),
+        user?.stringOrNull('name'),
+      ]),
+      avatarUrl: _firstFilled([
+        json.stringOrNull('avatar_url'),
+        json.stringOrNull('avatarUrl'),
+        user?.stringOrNull('avatar_url'),
+        user?.stringOrNull('avatarUrl'),
+      ]),
+      textPosition: json.objectOrNull('text_position', TaggedPosition.fromJson) ??
+          _textPositionFromPosition(json),
+      mediaPosition: json.objectOrNull('media_position', MediaPosition.fromJson),
+    );
+  }
   String? userId;
   String? username;
   String? tag;
@@ -978,6 +1011,8 @@ class MentionData {
         'user_id': userId,
         'username': username,
         'tag': tag,
+        'name': name,
+        'avatar_url': avatarUrl,
         'text_position': textPosition?.toJson(),
         'media_position': mediaPosition?.toJson(),
       }.removeEmptyValues();
@@ -1138,23 +1173,36 @@ class TaggedPlace {
     this.state,
   });
 
-  factory TaggedPlace.fromJson(Map<String, dynamic> json) => TaggedPlace(
-        address: json.getString('address'),
-        city: json.getString('city'),
-        coordinates: (json.listOrNull('coordinates') ?? [])
-            .map((x) => (x is num
-                    ? x.toDouble()
-                    : (x is String ? double.tryParse(x) : null)) ??
-                0.0)
-            .toList(),
-        country: json.getString('country'),
-        placeData: json.objectOrNull('place_data', PlaceData.fromJson),
-        placeId: json.getString('place_id'),
-        placeName: json.getString('place_name'),
-        placeType: json.getString('place_type'),
-        postalCode: json.getString('postal_code'),
-        state: json.getString('state'),
-      );
+  factory TaggedPlace.fromJson(Map<String, dynamic> json) {
+    final placeData = json.objectOrNull('place_data', PlaceData.fromJson) ??
+        (_firstFilled([json.stringOrNull('description')]) == null
+            ? null
+            : PlaceData(description: json.stringOrNull('description')));
+    return TaggedPlace(
+      address: json.getString('address'),
+      city: json.getString('city'),
+      coordinates: (json.listOrNull('coordinates') ?? [])
+          .map((x) =>
+              (x is num
+                  ? x.toDouble()
+                  : (x is String ? double.tryParse(x) : null)) ??
+              0.0)
+          .toList(),
+      country: json.getString('country'),
+      placeData: placeData,
+      placeId: json.getString('place_id'),
+      placeName: _firstFilled([
+            json.stringOrNull('place_name'),
+            json.stringOrNull('name'),
+            json.stringOrNull('address'),
+            placeData?.description,
+          ]) ??
+          '',
+      placeType: json.getString('place_type'),
+      postalCode: json.getString('postal_code'),
+      state: json.getString('state'),
+    );
+  }
   final String? address;
   final String? city;
   final List<double>? coordinates;
@@ -1208,6 +1256,21 @@ PostSoundInfo? _parseSoundInfo(Map<String, dynamic> json) {
   return PostSoundInfo(id: soundId, snapshot: snapshot);
 }
 
+String? _firstFilled(List<String?> values) {
+  for (final value in values) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isNotEmpty) return trimmed;
+  }
+  return null;
+}
+
+TaggedPosition? _textPositionFromPosition(Map<String, dynamic> json) {
+  final raw = json.mapOrNull('position');
+  if (raw == null) return null;
+  if (!raw.containsKey('start') && !raw.containsKey('end')) return null;
+  return TaggedPosition.fromJson(raw);
+}
+
 List<T> _parseObjectList<T>(
   Map<String, dynamic> json,
   String key,
@@ -1248,6 +1311,31 @@ List<MediaMetaData> reelMediaMetaDataFromTimeline(TimeLineData postData) {
   return [];
 }
 
+String _timelineUserFirstName(SocialUserData? user) {
+  if (user == null) return '';
+  for (final source in [user.displayName, user.fullName]) {
+    final trimmed = source?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      return trimmed.split(RegExp(r'\s+')).first;
+    }
+  }
+  return user.username ?? '';
+}
+
+String _timelineUserLastName(SocialUserData? user) {
+  if (user == null) return '';
+  for (final source in [user.displayName, user.fullName]) {
+    final trimmed = source?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      final parts =
+          trimmed.split(RegExp(r'\s+')).where((part) => part.isNotEmpty).toList();
+      if (parts.length > 1) return parts.last;
+      return '';
+    }
+  }
+  return '';
+}
+
 ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
     ReelsData(
       postData: postData,
@@ -1286,12 +1374,8 @@ ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
       userId: postData.user?.id ?? '',
       userName: postData.user?.username ?? '',
       profilePhoto: postData.user?.avatarUrl ?? '',
-      firstName: postData.user?.displayName?.split(' ').firstOrNull ?? '',
-      lastName: postData.user?.displayName
-              ?.split(' ')
-              .takeIf((_) => _.length > 1)
-              ?.lastOrNull ??
-          '',
+      firstName: _timelineUserFirstName(postData.user),
+      lastName: _timelineUserLastName(postData.user),
       likesCount: postData.engagementMetrics?.likeTypes?.like?.toInt() ?? 0,
       viewCount: postData.engagementMetrics?.views?.toInt() ?? 0,
       commentCount: postData.engagementMetrics?.comments?.toInt() ?? 0,
@@ -1304,6 +1388,7 @@ ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
       description: postData.caption ?? '',
       interests: postData.interests,
       sound: postData.sound,
+      isDataIncomplete: postData.isDataIncomplete,
     );
 
 MediaMetaData _getMediaMetaData(MediaData mediaData) {

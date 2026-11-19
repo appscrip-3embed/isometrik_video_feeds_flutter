@@ -15,6 +15,7 @@ import 'package:ism_video_reel_player/presentation/screens/story/widgets/story_v
 import 'package:ism_video_reel_player/presentation/screens/story/widgets/story_viewer_progress_bar.dart';
 import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/utils/enums.dart';
+import 'package:ism_video_reel_player/utils/media_url_util.dart';
 import 'package:video_player/video_player.dart';
 
 class StoryViewerView extends StatefulWidget {
@@ -285,7 +286,9 @@ class _StoryViewerViewState extends State<StoryViewerView> {
     _markViewed(story.id);
 
     if (_isVideo(story)) {
-      _video = VideoPlayerController.networkUrl(Uri.parse(story.mediaUrl));
+      _video = VideoPlayerController.networkUrl(
+        Uri.parse(preserveEmptyPathSegments(story.mediaUrl)),
+      );
       _video!
         ..initialize().then((_) {
           if (!mounted || _story?.id != story.id) return;
@@ -316,7 +319,7 @@ class _StoryViewerViewState extends State<StoryViewerView> {
     for (final i in targets) {
       final candidate = g.stories[i];
       if (_isVideo(candidate)) continue;
-      final url = candidate.mediaUrl.trim();
+      final url = preserveEmptyPathSegments(candidate.mediaUrl);
       if (url.isEmpty) continue;
       try {
         await precacheImage(CachedNetworkImageProvider(url), context);

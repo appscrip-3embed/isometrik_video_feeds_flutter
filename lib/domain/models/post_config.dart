@@ -140,6 +140,32 @@ enum PostFeedCardStyle {
   instagram,
 }
 
+/// Which feed posts open the full-screen reels player on a media tap.
+enum PostFeedOpenOnTapKind {
+  /// A post with a single photo.
+  image,
+
+  /// A post with a single video.
+  video,
+
+  /// A post with more than one media item.
+  carousel,
+}
+
+/// Playhead shared between a feed card and the reels player opened from it.
+///
+/// The reels player writes [mediaIndex] and [position] while that post is on
+/// screen. The feed reads the same object after the route pops.
+class FeedMediaPlaybackSession {
+  FeedMediaPlaybackSession({
+    this.mediaIndex = 0,
+    this.position = Duration.zero,
+  });
+
+  int mediaIndex;
+  Duration position;
+}
+
 /// UI tokens for the scrollable post-card feed layout.
 class PostFeedUIConfig {
   const PostFeedUIConfig({
@@ -176,6 +202,9 @@ class PostFeedUIConfig {
     this.formattedTextPostAspectRatio = 1,
     this.textPostHorizontalPadding = 16,
     this.textPostProfileImageSize = 42,
+    this.openPostOnTap = false,
+    this.openPostsToOpenOnTap = const <PostFeedOpenOnTapKind>[],
+    this.openPostContinuationSection,
   });
 
   /// Instagram-style post feed: header above media, counts, timestamps, dividers.
@@ -283,6 +312,27 @@ class PostFeedUIConfig {
   /// Profile avatar size for text-only posts in the feed (width and height).
   final double textPostProfileImageSize;
 
+  /// When true, a tap on feed media can open the full-screen reels player.
+  ///
+  /// Only kinds listed in [openPostsToOpenOnTap] open. An empty list opens nothing.
+  final bool openPostOnTap;
+
+  /// Media kinds that open the reels player when [openPostOnTap] is true.
+  ///
+  /// [PostFeedOpenOnTapKind.carousel] matches a post with more than one item.
+  /// A single photo or video matches [PostFeedOpenOnTapKind.image] or
+  /// [PostFeedOpenOnTapKind.video].
+  final List<PostFeedOpenOnTapKind> openPostsToOpenOnTap;
+
+  /// Section loaded after the tapped post in the reels player.
+  ///
+  /// Null uses [PostSectionType.trending]. [PostSectionType.forYou] is the
+  /// recommended feed.
+  final PostSectionType? openPostContinuationSection;
+
+  PostSectionType get resolvedOpenPostContinuationSection =>
+      openPostContinuationSection ?? PostSectionType.trending;
+
   PostFeedUIConfig copyWith({
     String? title,
     TextStyle? titleTextStyle,
@@ -317,6 +367,9 @@ class PostFeedUIConfig {
     double? formattedTextPostAspectRatio,
     double? textPostHorizontalPadding,
     double? textPostProfileImageSize,
+    bool? openPostOnTap,
+    List<PostFeedOpenOnTapKind>? openPostsToOpenOnTap,
+    PostSectionType? openPostContinuationSection,
   }) =>
       PostFeedUIConfig(
         title: title ?? this.title,
@@ -362,6 +415,11 @@ class PostFeedUIConfig {
             textPostHorizontalPadding ?? this.textPostHorizontalPadding,
         textPostProfileImageSize:
             textPostProfileImageSize ?? this.textPostProfileImageSize,
+        openPostOnTap: openPostOnTap ?? this.openPostOnTap,
+        openPostsToOpenOnTap:
+            openPostsToOpenOnTap ?? this.openPostsToOpenOnTap,
+        openPostContinuationSection: openPostContinuationSection ??
+            this.openPostContinuationSection,
       );
 }
 

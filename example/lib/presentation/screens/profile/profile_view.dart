@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ism_video_reel_player/ism_video_reel_player.dart' as isr;
@@ -48,6 +50,13 @@ class _ProfileViewState extends State<ProfileView> {
                 ),
                 const Divider(),
               ],
+
+              ListTile(
+                leading: const Icon(Icons.data_object),
+                title: const Text('JSON post'),
+                onTap: () => _showJsonPostSheet(context),
+              ),
+              const Divider(),
 
               // search Tile
               ListTile(
@@ -119,6 +128,24 @@ class _ProfileViewState extends State<ProfileView> {
     isr.IsrAppNavigator.navigateToSchedulePostListing(context);
   }
 
+  Future<void> _showJsonPostSheet(BuildContext context) async {
+    final posts = await showModalBottomSheet<List<isr.TimeLineData>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _JsonPostSheet(),
+    );
+    if (!mounted || posts == null || posts.isEmpty) return;
+    // Wait until the sheet route has left the tree before pushing reels.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await isr.IsrAppNavigator.navigateToReelsPlayer(
+      context,
+      postDataList: posts,
+      startingPostIndex: 0,
+      postSectionType: isr.PostSectionType.singlePost,
+    );
+  }
+
   void _search(BuildContext context) {
     isr.IsrAppNavigator.navigateToSearch(
       context,
@@ -166,4 +193,145 @@ class _ProfileViewState extends State<ProfileView> {
       ),
     );
   }
+}
+
+class _JsonPostSheet extends StatefulWidget {
+  const _JsonPostSheet();
+
+  @override
+  State<_JsonPostSheet> createState() => _JsonPostSheetState();
+}
+
+class _JsonPostSheetState extends State<_JsonPostSheet> {
+  final _controller = TextEditingController();
+  var _errorText = '';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _open() {
+    final trimmed = _controller.text.trim();
+    if (trimmed.isEmpty) {
+      setState(() => _errorText = 'Paste post JSON first');
+      return;
+    }
+
+    List<isr.TimeLineData> posts;
+    try {
+      posts = _timelinePostsFromJson(trimmed);
+    } catch (_) {
+      setState(() => _errorText = 'That JSON could not be read');
+      return;
+    }
+
+    if (posts.isEmpty) {
+      setState(() => _errorText = 'No posts found in that JSON');
+      return;
+    }
+
+    Navigator.of(context).pop(posts);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final maxHeight =
+        (screenHeight * 0.85 - viewInsets.bottom).clamp(180.0, screenHeight);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'JSON post',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _controller,
+                  minLines: 6,
+                  maxLines: 8,
+                  autofocus: true,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    hintText:
+                        'Paste a post JSON array, a single post, or a timeline response',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                if (_errorText.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _errorText,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _open,
+                  child: const Text('Open'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+List<isr.TimeLineData> _timelinePostsFromJson(String raw) {
+  final decoded = jsonDecode(raw);
+  return _postMaps(decoded)
+      .map(isr.TimeLineData.fromMap)
+      .where(
+        (post) =>
+            post.id?.trim().isNotEmpty == true ||
+            post.media?.isNotEmpty == true,
+      )
+      .toList();
+}
+
+List<Map<String, dynamic>> _postMaps(dynamic decoded) {
+  if (decoded is List) {
+    return decoded
+        .whereType<Map<dynamic, dynamic>>()
+        .map(Map<String, dynamic>.from)
+        .toList();
+  }
+  if (decoded is! Map) return const [];
+
+  final map = Map<String, dynamic>.from(decoded);
+  final data = map['data'];
+  if (data is List || data is Map) {
+    final nested = _postMaps(data);
+    if (nested.isNotEmpty) return nested;
+    if (data is Map) {
+      final posts = Map<String, dynamic>.from(data)['posts'];
+      if (posts != null) return _postMaps(posts);
+    }
+  }
+
+  if (map.containsKey('posts')) return _postMaps(map['posts']);
+  if (map.containsKey('id') ||
+      map.containsKey('media') ||
+      map.containsKey('user_id')) {
+    return [map];
+  }
+  return const [];
 }

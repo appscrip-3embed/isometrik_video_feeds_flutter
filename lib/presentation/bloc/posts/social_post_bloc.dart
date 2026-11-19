@@ -24,6 +24,17 @@ bool _silentPostDetailSnapshotsEqual(
   return true;
 }
 
+/// Text posts belong on the scrollable Feed tab only ([TimelinePostTypeUtil]).
+List<TimeLineData> _postsVisibleInSection(
+  PostSectionType section,
+  Iterable<TimeLineData> posts,
+) {
+  if (TimelinePostTypeUtil.shouldShowTextPosts(section)) {
+    return posts is List<TimeLineData> ? posts : posts.toList();
+  }
+  return TimelinePostTypeUtil.withoutTextPosts(posts);
+}
+
 class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
   SocialPostBloc(
       this._localDataUseCase,
@@ -187,7 +198,12 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     if (IsrFeedCacheRepository.instance.isSectionExpired(section)) return;
     for (final map in IsrFeedCacheRepository.instance.getPosts(section)) {
       try {
-        postTab.postList.add(TimeLineData.fromMap(map));
+        final post = TimeLineData.fromMap(map);
+        if (!TimelinePostTypeUtil.shouldShowTextPosts(postTab.postSectionType) &&
+            post.isTextPost) {
+          continue;
+        }
+        postTab.postList.add(post);
       } catch (_) {}
     }
   }
@@ -343,7 +359,8 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         final postId = _trimmedPostId(postTab);
         final hasPosts = postTab.postList.isNotEmpty;
         final canFetch =
-            !postTab.postSectionType.isUserDependent || isUserLoggedIn;
+            postTab.postSectionType != PostSectionType.multiplePost &&
+                (!postTab.postSectionType.isUserDependent || isUserLoggedIn);
 
         if (!hasPosts) {
           // Case 1: no postId, no list → list API
@@ -416,7 +433,8 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
             );
           }
         }
-        if (!postTab.postSectionType.isUserDependent || isUserLoggedIn) {
+        if (postTab.postSectionType != PostSectionType.multiplePost &&
+            (!postTab.postSectionType.isUserDependent || isUserLoggedIn)) {
           await _callGetTabPost(
             postTab,
             false,
@@ -580,10 +598,14 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         break;
       case PostSectionType.following:
       case PostSectionType.feeds:
+        final timelinePostTypes = postSectionType == PostSectionType.feeds
+            ? TimelinePostTypeUtil.feedPostTypes
+            : TimelinePostTypeUtil.followingPostTypes;
         final timelineResult = await _getTimelinePostUseCase.executeTimeLinePost(
           isLoading: isLoading,
           page: tabAssistData.currentPage,
           pageLimit: tabAssistData.pageSize,
+          postTypes: timelinePostTypes,
         );
         apiError = timelineResult.error;
         timelineResponse = timelineResult.data;
@@ -659,8 +681,13 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
           });
         }
         break;
-      default:
+      case PostSectionType.singlePost:
+      case PostSectionType.multiplePost:
+      case PostSectionType.purchasedPost:
         break;
+    }
+    if (apiPostResult != null && apiPostResult!.isNotEmpty) {
+      apiPostResult = _postsVisibleInSection(postSectionType, apiPostResult!);
     }
     var postDataList = <TimeLineData>[];
     if (postIdPostData != null) {
@@ -1455,11 +1482,26 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
   /// Emits [SocialPostLoadedState] immediately. Use inside [LoadPostData] instead
   /// of [add] + [LoadPostsEvent] so each tab can clear its shimmer without
   /// waiting for every other tab's network call to finish.
+  void _pinPostFirst(PostSectionType postType, List<TimeLineData> postList) {
+    final pinId = _postsByTab
+        .where((tab) => tab.postSectionType == postType)
+        .map((tab) => tab.pinPostId?.trim())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .firstOrNull;
+    if (pinId == null || postList.length < 2) return;
+    final index = postList.indexWhere((post) => post.id == pinId);
+    if (index <= 0) return;
+    final post = postList.removeAt(index);
+    postList.insert(0, post);
+  }
+
   Future<void> _emitLoadedPosts(
     Emitter<SocialPostState> emit,
     PostSectionType postType,
     List<TimeLineData> postList,
   ) async {
+    _pinPostFirst(postType, postList);
     final myUserId = await _localDataUseCase.getUserId();
     if (isClosed) return;
     emit(SocialPostLoadedState(

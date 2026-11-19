@@ -195,6 +195,21 @@ const Map<String, String> kIsrTrFallback = {
   'processing': 'Processing',
   'postDetailsRejectedReplaceInstruction':
       'Replace or remove the flagged items below, then resubmit. Your approved items are untouched.',
+  'reason': 'Reason',
+  'postDetailsPostRejectedTitle': 'This post was rejected',
+  'postDetailsRejectedAttributeInstruction':
+      'Edit the flagged details below, then resubmit.',
+  'postDetailsEditedStatusLabel': 'Edited',
+  'postDetailsApprovedStatusLabel': 'Approved',
+  'postDetailsCaptionLabel': 'Caption',
+  'postDetailsEditCaption': 'Edit caption',
+  'postDetailsEditAttributes': 'Edit Attributes',
+  'postDetailsCaptionPreviewHidden':
+      'Caption preview hidden because this text was flagged.',
+  'postDetailsApprovedContentReasonVideo':
+      'This video meets our content standards.',
+  'postDetailsApprovedContentReasonImage':
+      'This image meets our content standards.',
   'postDetailsAllItemsInPost': 'All Items in this post',
   'postDetailsReplaceFromDevice': 'Replace from device',
   'postDetailsRemoveMedia': 'Remove',

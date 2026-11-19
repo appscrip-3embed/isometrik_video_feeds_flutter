@@ -204,6 +204,7 @@ class IsrTranslationFile {
       isrTr('postDetailsResubmittedTitle');
   static String get postDetailsDefaultRejectionReason =>
       isrTr('postDetailsDefaultRejectionReason');
+  static String get reason => isrTr('reason');
   static String get postDetailsSubmittedLabel =>
       isrTr('postDetailsSubmittedLabel');
   static String get postDetailsReviewedLabel =>
@@ -215,6 +216,24 @@ class IsrTranslationFile {
   static String get processing => isrTr('processing');
   static String get postDetailsRejectedReplaceInstruction =>
       isrTr('postDetailsRejectedReplaceInstruction');
+  static String get postDetailsPostRejectedTitle =>
+      isrTr('postDetailsPostRejectedTitle');
+  static String get postDetailsRejectedAttributeInstruction =>
+      isrTr('postDetailsRejectedAttributeInstruction');
+  static String get postDetailsEditedStatusLabel =>
+      isrTr('postDetailsEditedStatusLabel');
+  static String get postDetailsApprovedStatusLabel =>
+      isrTr('postDetailsApprovedStatusLabel');
+  static String get postDetailsCaptionLabel => isrTr('postDetailsCaptionLabel');
+  static String get postDetailsEditCaption => isrTr('postDetailsEditCaption');
+  static String get postDetailsEditAttributes =>
+      isrTr('postDetailsEditAttributes');
+  static String get postDetailsCaptionPreviewHidden =>
+      isrTr('postDetailsCaptionPreviewHidden');
+  static String postDetailsApprovedContentReason({required bool isVideo}) =>
+      isrTr(isVideo
+          ? 'postDetailsApprovedContentReasonVideo'
+          : 'postDetailsApprovedContentReasonImage');
   static String get postDetailsAllItemsInPost =>
       isrTr('postDetailsAllItemsInPost');
   static String get postDetailsReplaceFromDevice =>

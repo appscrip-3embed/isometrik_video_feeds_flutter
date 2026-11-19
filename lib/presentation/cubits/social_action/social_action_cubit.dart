@@ -66,10 +66,42 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
 
   Future<TimeLineData?> getAsyncPostById(String postId) async {
     final cached = _uniquePostList[postId];
-    if (cached != null) {
+    if (cached != null && !cached.isDataIncomplete) {
       return cached;
     }
 
+    return _fetchPostDetailsDeduped(postId);
+  }
+
+  /// Fetches full post details when the host seeded an incomplete payload.
+  ///
+  /// Skips the network call when [_uniquePostList] already has a complete
+  /// post, but still notifies listeners so UI showing the incomplete row
+  /// can swap in the cached complete data.
+  Future<TimeLineData?> hydrateIncompletePost(String postId) async {
+    if (postId.isEmpty) return null;
+
+    final cached = _uniquePostList[postId];
+    if (cached != null && !cached.isDataIncomplete) {
+      emit(IsmPostHydratedActionListenerState(
+        postId: postId,
+        postData: cached,
+      ));
+      return cached;
+    }
+
+    final post = await _fetchPostDetailsDeduped(postId);
+    if (post == null) return cached;
+    post.isDataIncomplete = false;
+    updatePostList([post]);
+    emit(IsmPostHydratedActionListenerState(
+      postId: postId,
+      postData: post,
+    ));
+    return post;
+  }
+
+  Future<TimeLineData?> _fetchPostDetailsDeduped(String postId) {
     final inFlight = _inFlightPostDetailsRequests[postId];
     if (inFlight != null) {
       return inFlight;
@@ -92,6 +124,7 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
     final postData = result.data;
 
     if (postData != null) {
+      postData.isDataIncomplete = false;
       updatePostList([postData]);
     }
     if (result.isError && showError) {
@@ -171,7 +204,7 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
     return userData;
   }
 
-  getUserFollowState(String userId, {bool? isFollowing}) async {
+  getUserFollowState(String userId, {bool? isFollowing, bool showError = false}) async {
     if (userId.isNotEmpty) {
       emit(IsmFollowUserState(
         isFollowing: isFollowing == true,
@@ -179,7 +212,7 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
         userId: userId,
         isLoading: true,
       ));
-      final userData = await _getSocialUserDetails(userId, showError: true);
+      final userData = await _getSocialUserDetails(userId, showError: showError);
       final pending = FollowRelationshipUi.isRelationshipRequested(
         isRequested: userData?.isRequested,
         followStatus: userData?.followStatus,

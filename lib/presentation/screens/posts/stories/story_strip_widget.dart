@@ -108,12 +108,13 @@ class _StoryStripWidgetState extends State<StoryStripWidget> {
                     onViewStory: ownGroup == null
                         ? null
                         : () async {
+                            final group = ownGroup!;
                             final hostTap =
                                 storyConfig.storyCallbackConfig.onStoryTap;
                             if (hostTap != null) {
-                              await hostTap(ownGroup!.stories.first);
+                              await hostTap(group.stories.first);
                               await cubit
-                                  .markStoryViewed(ownGroup.stories.first.id);
+                                  .markStoryViewed(group.stories.first.id);
                               return;
                             }
                             await IsrAppNavigator.presentStoryViewer(

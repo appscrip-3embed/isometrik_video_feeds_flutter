@@ -258,12 +258,15 @@ class IsrAppNavigator {
     Function(String, String, double, double)? onTapPlace,
     TransitionType transitionType = TransitionType.rightToLeft,
     bool lockSeededPostList = false,
+    FeedMediaPlaybackSession? playbackSession,
   }) async {
     if (lockSeededPostList) {
       markViewerOwnedPostsUnlocked(postDataList);
       IsmSocialActionCubit.instance().updatePostList(postDataList);
     }
-
+    final pinPostId = playbackSession == null || postDataList.isEmpty
+        ? null
+        : postDataList.first.id;
     final tabData = TabDataModel(
       title: _getTabTitle(postSectionType),
       postSectionType: postSectionType,
@@ -276,6 +279,8 @@ class IsrAppNavigator {
       allowDuplicatePostInList: allowDuplicatePostInList,
       initialCommentId: initialCommentId,
       lockSeededPostList: lockSeededPostList,
+      pinPostId: pinPostId,
+      playbackSession: playbackSession,
     );
 
     final socialPostBloc = IsmInjectionUtils.getBloc<SocialPostBloc>();
@@ -289,6 +294,7 @@ class IsrAppNavigator {
         tabConfig: tabConfig,
         postConfig: postConfig,
         isOverlayPlayer: true,
+        mountReelsImmediately: playbackSession != null,
       ),
     );
 
@@ -297,6 +303,7 @@ class IsrAppNavigator {
     await IsrVideoReelConfig.hardStopAllReelsMedia();
     IsrVideoReelConfig.enterOverlayReelsPlayer(
       overlaySection: postSectionType,
+      pauseUnderlying: playbackSession == null,
     );
     try {
       await Navigator.of(context, rootNavigator: true).push(
@@ -323,6 +330,8 @@ class IsrAppNavigator {
       case PostSectionType.savedPost:
         return 'Saved';
       case PostSectionType.tagPost:
+        return 'Posts';
+      case PostSectionType.multiplePost:
         return 'Posts';
       default:
         return 'Posts';
@@ -767,6 +776,7 @@ class IsrAppNavigator {
     required TimeLineData postData,
     TransitionType? transitionType,
     bool isRejectedResubmit = false,
+    bool popWithSavedAttributes = false,
   }) async {
     if (TimelinePostTypeUtil.isTextPost(postData)) {
       return goToEditTextPostView(
@@ -786,6 +796,7 @@ class IsrAppNavigator {
         postData: postData,
         isEditMode: true,
         isRejectedResubmit: isRejectedResubmit,
+        popWithSavedAttributes: popWithSavedAttributes,
       ),
     );
 

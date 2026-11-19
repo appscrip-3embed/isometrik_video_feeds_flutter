@@ -144,17 +144,49 @@ class NetworkClient with AppMixin {
     if (isLoading) Utility.showLoader();
 
     try {
+      final stopwatch = Stopwatch()..start();
       final response = await getFinalResponse(finalUrl, headers, data, request);
+      stopwatch.stop();
       if (isLoading) Utility.closeProgressDialog();
       final res = returnResponse(response);
+      final timeTaken = stopwatch.elapsedMilliseconds;
+      final elapsed = timeTaken == 0
+          ? stopwatch.elapsed
+          : Duration(milliseconds: timeTaken);
 
-      logRequest(this, response, data, finalUrl, headers, res, 0, _talker);
+      logRequest(
+        this,
+        response,
+        data,
+        finalUrl,
+        headers,
+        res,
+        timeTaken,
+        _talker,
+      );
+      _emitNetworkLog(
+        method: response.request?.method ?? request.name.toUpperCase(),
+        uri: finalUrl,
+        headers: headers,
+        requestBody: data,
+        responseBody: res.data,
+        statusCode: res.statusCode,
+        elapsed: elapsed,
+      );
 
       if (res.hasError) {
         return _proceedWithErrorResponse(res, response);
       }
       return res;
-    } on TimeoutException {
+    } on TimeoutException catch (error, stackTrace) {
+      _emitNetworkLog(
+        method: request.name.toUpperCase(),
+        uri: finalUrl,
+        headers: headers,
+        requestBody: data,
+        error: error,
+        stackTrace: stackTrace,
+      );
       throw TimeoutError(IsrTranslationFile.timeoutError);
     } catch (error, stackTrace) {
       if (isLoading) Utility.closeProgressDialog();
@@ -162,6 +194,14 @@ class NetworkClient with AppMixin {
       if (error is AppError) {
         rethrow;
       }
+      _emitNetworkLog(
+        method: request.name.toUpperCase(),
+        uri: finalUrl,
+        headers: headers,
+        requestBody: data,
+        error: error,
+        stackTrace: stackTrace,
+      );
       throw NetworkError(error.toString());
     }
   }
@@ -283,8 +323,10 @@ class NetworkClient with AppMixin {
       multipartRequest.headers
           .addAll(_sanitizeHeaders(resolvedRequest.headers ?? headers));
 
+      final stopwatch = Stopwatch()..start();
       final streamedResponse = await multipartRequest.send();
       var response = await http.Response.fromStream(streamedResponse);
+      stopwatch.stop();
       if (isLoading) Utility.closeProgressDialog();
       var res = returnResponse(response);
       if (multipartFiles != null && multipartFiles.isNotEmpty) {
@@ -293,6 +335,15 @@ class NetworkClient with AppMixin {
         _talker?.log(msg);
         printLog(this, msg);
       }
+      _emitNetworkLog(
+        method: response.request?.method ?? 'POST',
+        uri: finalUrl,
+        headers: resolvedRequest.headers ?? headers,
+        requestBody: multipartData,
+        responseBody: res.data,
+        statusCode: res.statusCode,
+        elapsed: stopwatch.elapsed,
+      );
       return res;
     } else {
       return const ResponseModel(
@@ -364,6 +415,33 @@ class NetworkClient with AppMixin {
 
   Map<String, String> _sanitizeHeaders(Map<String, String> headers) =>
       headers.map((k, v) => MapEntry(k, _sanitizeHeaderValue(v)));
+
+  /// Forwards a completed or failed call to the host observer.
+  ///
+  /// Does nothing when [IsrVideoReelConfig.registerNetworkLog] was not called.
+  /// Does not print the event and does not redact [headers].
+  void _emitNetworkLog({
+    required String method,
+    required Uri uri,
+    Map<String, String>? headers,
+    Object? requestBody,
+    String? responseBody,
+    int? statusCode,
+    Duration elapsed = Duration.zero,
+    Object? error,
+    StackTrace? stackTrace,
+  }) =>
+      IsrVideoReelConfig.emitNetworkLog(
+        method: method,
+        uri: uri,
+        headers: headers,
+        requestBody: requestBody,
+        responseBody: responseBody,
+        statusCode: statusCode,
+        elapsed: elapsed,
+        error: error,
+        stackTrace: stackTrace,
+      );
 
   _ResolvedNetworkRequest _applyNetworkOverrides({
     required String apiUrl,

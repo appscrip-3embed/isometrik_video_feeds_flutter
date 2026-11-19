@@ -256,14 +256,18 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   @override
   Future<IVideoPlayerController?> precacheMediaAndReturnController(
-          String url) =>
+      String url, {
+        bool useFallBackControllerOnFail = true,
+      }) =>
       Future<IVideoPlayerController?>.delayed(
         const Duration(milliseconds: 300),
-        () => _createAndInitializeController(url),
+        () => _createAndInitializeController(url, useFallBackControllerOnFail: useFallBackControllerOnFail),
       );
 
   Future<IVideoPlayerController?> _createAndInitializeController(
-      String url) async {
+      String url, {
+        bool useFallBackControllerOnFail = true,
+      }) async {
     debugPrint(
         'StandardVideoCacheManager: _createAndInitializeController: $url');
     VideoPlayerController? controller;
@@ -284,7 +288,7 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
         debugPrint(
             '❌ StandardNonCacheVideoPlayer not initialized properly for: $url');
         await controller.dispose();
-        return _fallbackToMediaKit(url, reason: 'not initialized');
+        return useFallBackControllerOnFail? _fallbackToMediaKit(url, reason: 'not initialized') : null;
       }
 
       if (controller.value.hasError) {
@@ -292,7 +296,7 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
             '❌ StandardNonCacheVideoPlayer has error after initialization: ${controller.value.errorDescription}');
         debugPrint('❌ URL: $url');
         await controller.dispose();
-        return _fallbackToMediaKit(url, reason: 'hasError');
+        return useFallBackControllerOnFail? _fallbackToMediaKit(url, reason: 'not initialized') : null;
       }
 
       // Size can be 0x0 briefly then become valid — wait before treating as failure.
@@ -302,7 +306,7 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
             '⚠️ StandardNonCacheVideoPlayer size still 0x0 after wait for: $url');
         await controller.dispose();
         controller = null;
-        return _fallbackToMediaKit(url, reason: 'zero size after wait');
+        return useFallBackControllerOnFail? _fallbackToMediaKit(url, reason: 'not initialized') : null;
       }
 
       debugPrint(
@@ -327,7 +331,7 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
         } catch (_) {}
       }
       await Future.delayed(const Duration(milliseconds: 300));
-      return _fallbackToMediaKit(url, reason: 'exception');
+      return useFallBackControllerOnFail? _fallbackToMediaKit(url, reason: 'not initialized') : null;
     }
   }
 
@@ -387,7 +391,7 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
       );
     }
 
-    var url = mediaUrl;
+    var url = preserveEmptyPathSegments(mediaUrl);
     if (url.startsWith('http:')) {
       url = url.replaceFirst('http:', 'https:');
     }
