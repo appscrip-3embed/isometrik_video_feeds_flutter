@@ -627,6 +627,7 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
                 if (widget.mediaSelectionConfig.isMultiSelect) ...[
                   // Select mode toggle
                   IconButton(
+                    iconSize: 32,
                     icon: state.isMultiSelectMode
                         ? widget.mediaSelectionConfig.multiSelectModeIcon
                         : widget.mediaSelectionConfig.singleSelectModeIcon,

@@ -251,13 +251,15 @@ abstract final class CreatePostFlowCoordinator {
       videoMediaLimit: videoMediaLimit ?? IsrAppConstants.videoMediaLimit,
       mediaLimit: mediaLimit ?? IsrAppConstants.totalMediaLimit,
       closeIcon: ms.MediaSelectionConstant.closeIcon(color: textColor),
-      singleSelectModeIcon: AppImage.svg(
+      singleSelectModeIcon: const AppImage.svg(
         AssetConstants.icMediaSelectSingle,
-        color: textColor,
+        width: 32,
+        height: 32,
       ),
-      multiSelectModeIcon: AppImage.svg(
+      multiSelectModeIcon: const AppImage.svg(
         AssetConstants.icMediaSelectMultiple,
-        color: textColor,
+        width: 32,
+        height: 32,
       ),
       doneButtonText: doneButtonText ?? IsrTranslationFile.next,
       selectMediaTitle: selectMediaTitle ?? IsrTranslationFile.newReel,
@@ -447,7 +449,7 @@ abstract final class CreatePostFlowCoordinator {
     final res = await IsrAppNavigator.presentCreatePostMediaSelector(
       context,
       initialSound: selectedSound,
-      config: defaultMediaSelectionConfig(
+      config: resolvedMediaSelectionConfig(
         mediaListType: (videoLimit > 0 && imageLimit > 0)
             ? ms.MediaListType.imageVideo
             : (videoLimit > 0)
@@ -473,7 +475,7 @@ abstract final class CreatePostFlowCoordinator {
   static Future<String?> pickCoverPic(BuildContext context) async {
     final res = await IsrAppNavigator.presentCreatePostMediaSelector(
       context,
-      config: defaultMediaSelectionConfig(
+      config: resolvedMediaSelectionConfig(
         mediaListType: ms.MediaListType.image,
         isMultiSelect: false,
         selectMediaTitle: IsrTranslationFile.addCover,
@@ -576,7 +578,8 @@ class _StackedCreatePostFlowHost extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ms.MediaSelectionView(
-        mediaSelectionConfig: CreatePostFlowCoordinator.defaultMediaSelectionConfig(),
+        mediaSelectionConfig:
+            CreatePostFlowCoordinator.resolvedMediaSelectionConfig(),
         onComplete: (selectedMedia) => CreatePostFlowCoordinator.onMediaSelectorComplete(
           context,
           selectedMedia: selectedMedia,
