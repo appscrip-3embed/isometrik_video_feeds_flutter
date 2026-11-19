@@ -24,6 +24,17 @@ bool _silentPostDetailSnapshotsEqual(
   return true;
 }
 
+/// Text posts belong on the scrollable Feed tab only ([TimelinePostTypeUtil]).
+List<TimeLineData> _postsVisibleInSection(
+  PostSectionType section,
+  Iterable<TimeLineData> posts,
+) {
+  if (TimelinePostTypeUtil.shouldShowTextPosts(section)) {
+    return posts is List<TimeLineData> ? posts : posts.toList();
+  }
+  return TimelinePostTypeUtil.withoutTextPosts(posts);
+}
+
 class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
   SocialPostBloc(
       this._localDataUseCase,
@@ -187,7 +198,12 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     if (IsrFeedCacheRepository.instance.isSectionExpired(section)) return;
     for (final map in IsrFeedCacheRepository.instance.getPosts(section)) {
       try {
-        postTab.postList.add(TimeLineData.fromMap(map));
+        final post = TimeLineData.fromMap(map);
+        if (!TimelinePostTypeUtil.shouldShowTextPosts(postTab.postSectionType) &&
+            post.isTextPost) {
+          continue;
+        }
+        postTab.postList.add(post);
       } catch (_) {}
     }
   }
@@ -582,10 +598,14 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         break;
       case PostSectionType.following:
       case PostSectionType.feeds:
+        final timelinePostTypes = postSectionType == PostSectionType.feeds
+            ? TimelinePostTypeUtil.feedPostTypes
+            : TimelinePostTypeUtil.followingPostTypes;
         final timelineResult = await _getTimelinePostUseCase.executeTimeLinePost(
           isLoading: isLoading,
           page: tabAssistData.currentPage,
           pageLimit: tabAssistData.pageSize,
+          postTypes: timelinePostTypes,
         );
         apiError = timelineResult.error;
         timelineResponse = timelineResult.data;
@@ -665,6 +685,9 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
       case PostSectionType.multiplePost:
       case PostSectionType.purchasedPost:
         break;
+    }
+    if (apiPostResult != null && apiPostResult!.isNotEmpty) {
+      apiPostResult = _postsVisibleInSection(postSectionType, apiPostResult!);
     }
     var postDataList = <TimeLineData>[];
     if (postIdPostData != null) {
