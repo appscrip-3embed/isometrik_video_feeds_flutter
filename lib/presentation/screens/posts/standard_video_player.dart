@@ -435,7 +435,9 @@ class StandardVideoCacheManager implements IVideoCacheManager {
 
   @override
   Future<IVideoPlayerController?> precacheMediaAndReturnController(
-      String url) async {
+      String url, {
+        bool useFallBackControllerOnFail = true,
+      }) async {
     await precacheVideos([url]);
     return getCachedController(url);
   }

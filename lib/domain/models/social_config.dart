@@ -32,6 +32,57 @@ typedef SdkDialogCallback = Future<void> Function({
   Future<void> Function()? onPressNegativeButton,
 });
 
+/// Maps a stored media URL to a Gumlet (or similar) display URL.
+///
+/// All named args are optional. The SDK forwards widget [width]/[height] at
+/// render time; hosts may also use [quality], [format], and [extra] (dpr, mode,
+/// blur, etc.). Used only when displaying media — the SDK persists the original
+/// URL.
+typedef ConvertToGumletUrl = String Function(
+  String mediaUrl, {
+  double? width,
+  double? height,
+  int? quality,
+  String? format,
+  Map<String, String>? extra,
+});
+
+/// Adapts a legacy 1-arg converter to [ConvertToGumletUrl].
+ConvertToGumletUrl wrapConvertToGumletUrl(String Function(String mediaUrl) convert) =>
+    (url, {width, height, quality, format, extra}) => convert(url);
+
+/// Maps a Gumlet (or similar) display URL back to the stored original URL.
+typedef RevertGumletUrl = String Function(String gumletUrl);
+
+/// Origin-to-CDN prefix pair so the SDK can convert and revert without host callbacks.
+///
+/// Use when Gumlet is a host/path rewrite (keep the path, swap the prefix).
+/// The path after [originalUrlPrefix] must match the path after [gumletUrlPrefix].
+/// Multiple entries cover staging/prod buckets or more than one CDN.
+class GumletMappingConfig {
+  const GumletMappingConfig({
+    required this.originalUrlPrefix,
+    required this.gumletUrlPrefix,
+    this.quality,
+    this.format,
+    this.enabled = true,
+  });
+
+  /// Stored/origin prefix, e.g. `https://storage.googleapis.com/tfm-prod`.
+  final String originalUrlPrefix;
+
+  /// CDN prefix, e.g. `https://cdn.trulyfreehome.dev`.
+  final String gumletUrlPrefix;
+
+  /// Default image quality when the widget does not pass one.
+  final int? quality;
+
+  /// Default image format (`webp`, `avif`) — applied to images only.
+  final String? format;
+
+  final bool enabled;
+}
+
 /// Main configuration class for social features in the SDK.
 ///
 /// This class allows you to customize various aspects of the SDK including:
@@ -111,9 +162,13 @@ class SocialConfig {
     this.secondaryButton,
     this.tertiaryButton,
     this.googleCloudUpload,
+    this.gumletMappings = const [],
   });
 
   final SocialCallBackConfig? socialCallBackConfig;
+
+  /// SDK-owned Gumlet convert/revert. Used when convert/revert callbacks are omitted.
+  final List<GumletMappingConfig> gumletMappings;
 
   /// App-side loader builder reused across the complete SDK.
   ///
@@ -160,7 +215,7 @@ class SocialConfig {
   /// Falls back to theme defaults if not provided.
   final ButtonConfig? tertiaryButton;
 
-  /// Google Cloud Storage upload settings (service account JSON path and bucket).
+  /// Google Cloud Storage upload settings (inline JSON or asset path, plus bucket).
   final GoogleCloudUpload? googleCloudUpload;
 
   SocialConfig copyWith({
@@ -176,6 +231,7 @@ class SocialConfig {
     ButtonConfig? secondaryButton,
     ButtonConfig? tertiaryButton,
     GoogleCloudUpload? googleCloudUpload,
+    List<GumletMappingConfig>? gumletMappings,
   }) =>
       SocialConfig(
         socialCallBackConfig: socialCallBackConfig ?? this.socialCallBackConfig,
@@ -190,6 +246,7 @@ class SocialConfig {
         secondaryButton: secondaryButton ?? this.secondaryButton,
         tertiaryButton: tertiaryButton ?? this.tertiaryButton,
         googleCloudUpload: googleCloudUpload ?? this.googleCloudUpload,
+        gumletMappings: gumletMappings ?? this.gumletMappings,
       );
 }
 
@@ -209,7 +266,14 @@ class SocialConfig {
 ///   uploadMediaToCloud: (file, fileName, mediaType, onProgress, folderName, ext) async {
 ///     return await myUploader.upload(...);
 ///   },
-///   convertToGumletUrl: (mediaUrl) { /* return Gumlet URL if enabled */ return mediaUrl; },
+///   convertToGumletUrl: (mediaUrl, {width, height, quality, format, extra}) {
+///     // Host-owned convert. Wins over SocialConfig.gumletMappings.
+///     return mediaUrl;
+///   },
+///   revertGumletUrl: (gumletUrl) {
+///     // Host-owned revert for fallback / legacy stored Gumlet URLs.
+///     return gumletUrl;
+///   },
 ///   onNegativeDialog: ({
 ///     required title,
 ///     required message,
@@ -237,6 +301,7 @@ class SocialCallBackConfig {
     this.onLoginInvoked,
     this.uploadMediaToCloud,
     this.convertToGumletUrl,
+    this.revertGumletUrl,
     this.placeHolderGenerator,
     this.onSocialEventTriggered,
     this.onNegativeDialog,
@@ -268,9 +333,17 @@ class SocialCallBackConfig {
     String fileExtension,
   )? uploadMediaToCloud;
 
-  /// When Gumlet (or similar) is enabled in the host project, map a raw media URL to the
-  /// optimized Gumlet URL. If omitted, SDK uses the URL returned from upload as-is.
-  final String Function(String mediaUrl)? convertToGumletUrl;
+  /// Host-owned convert. When set, this wins over [SocialConfig.gumletMappings].
+  ///
+  /// Images receive widget [width]/[height] (and optional [quality], [format],
+  /// [extra]). Videos pass `extra['mediaType'] = 'video'` only.
+  /// Legacy 1-arg hosts can use [wrapConvertToGumletUrl].
+  final ConvertToGumletUrl? convertToGumletUrl;
+
+  /// Host-owned revert (Gumlet → original). When set, this wins over mappings.
+  /// Required for callback-only hosts so legacy stored Gumlet URLs can fall back.
+  /// Return empty to skip.
+  final RevertGumletUrl? revertGumletUrl;
 
   /// to generate your own placeholders.
   final Widget? Function(double? height, double? width)? placeHolderGenerator;
@@ -293,7 +366,8 @@ class SocialCallBackConfig {
       String folderName,
       String fileExtension,
     )? uploadMediaToCloud,
-    String Function(String mediaUrl)? convertToGumletUrl,
+    ConvertToGumletUrl? convertToGumletUrl,
+    RevertGumletUrl? revertGumletUrl,
     Widget? Function(double? height, double? width)? placeHolderGenerator,
     Function(SocialEventModel eventModel)? onSocialEventTriggered,
     SdkDialogCallback? onNegativeDialog,
@@ -303,6 +377,7 @@ class SocialCallBackConfig {
         onLoginInvoked: onLoginInvoked ?? this.onLoginInvoked,
         uploadMediaToCloud: uploadMediaToCloud ?? this.uploadMediaToCloud,
         convertToGumletUrl: convertToGumletUrl ?? this.convertToGumletUrl,
+        revertGumletUrl: revertGumletUrl ?? this.revertGumletUrl,
         placeHolderGenerator: placeHolderGenerator ?? this.placeHolderGenerator,
         onSocialEventTriggered:
             onSocialEventTriggered ?? this.onSocialEventTriggered,
@@ -313,26 +388,39 @@ class SocialCallBackConfig {
 
 /// Google Cloud Storage upload configuration.
 ///
-/// Provide the filesystem path to your service account JSON key file and the
-/// target GCS bucket name.
+/// Prefer [credentialsJson] (service account JSON body) so the key is not
+/// shipped as a Flutter asset. [credentialsJsonPath] remains as a deprecated
+/// fallback.
 class GoogleCloudUpload {
   const GoogleCloudUpload({
-    required this.credentialsJsonPath,
+    @Deprecated('Use credentialsJson. Asset path ships the key in the binary.')
+    this.credentialsJsonPath = '',
+    this.credentialsJson = '',
     required this.bucketName,
   });
 
-  /// Path to the Google Cloud service account credentials JSON file.
+  /// Optional Flutter asset path to the service account credentials JSON.
   final String credentialsJsonPath;
+
+  /// Service account JSON body (for example from `--dart-define-from-file`).
+  final String credentialsJson;
 
   /// GCS bucket name for uploads.
   final String bucketName;
 
+  /// True when inline JSON or an asset path can be used for uploads.
+  bool get hasCredentials =>
+      credentialsJson.isNotEmpty || credentialsJsonPath.isNotEmpty;
+
   GoogleCloudUpload copyWith({
     String? credentialsJsonPath,
+    String? credentialsJson,
     String? bucketName,
   }) =>
       GoogleCloudUpload(
+        // ignore: deprecated_member_use_from_same_package
         credentialsJsonPath: credentialsJsonPath ?? this.credentialsJsonPath,
+        credentialsJson: credentialsJson ?? this.credentialsJson,
         bucketName: bucketName ?? this.bucketName,
       );
 }

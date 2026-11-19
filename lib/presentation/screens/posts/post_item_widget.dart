@@ -167,9 +167,26 @@ class _PostItemWidgetState extends State<PostItemWidget>
           next[i].mediaMetaDataList.length) {
         return false;
       }
+      if (previous[i].description != next[i].description) return false;
+      if (previous[i].mentions.length != next[i].mentions.length) return false;
+      if ((previous[i].placeDataList?.length ?? 0) !=
+          (next[i].placeDataList?.length ?? 0)) {
+        return false;
+      }
+      if (previous[i].placeDataList?.firstOrNull?.placeId !=
+          next[i].placeDataList?.firstOrNull?.placeId) {
+        return false;
+      }
+      if (_mentionIdentity(previous[i]) != _mentionIdentity(next[i])) {
+        return false;
+      }
     }
     return true;
   }
+
+  String _mentionIdentity(ReelsData reel) => reel.mentions
+      .map((mention) => '${mention.userId}:${mention.username}:${mention.name}')
+      .join('|');
 
   bool _hasSameReelsPrefix(List<ReelsData> prefix, List<ReelsData> full) {
     if (prefix.length > full.length) return false;
@@ -307,6 +324,7 @@ class _PostItemWidgetState extends State<PostItemWidget>
                 widget.postSectionType == PostSectionType.savedPost) ||
             (current is IsmDeletedPostActionListenerState) ||
             (current is IsmEditPostActionListenerState) ||
+            (current is IsmPostHydratedActionListenerState) ||
             (current is IsmMentionRemovedActionListenerState),
         listener: (context, state) {
           if (state is IsmFollowActionListenerState &&
@@ -322,6 +340,12 @@ class _PostItemWidgetState extends State<PostItemWidget>
             _updateWithMentionRemovedAction(state);
           } else if (state is IsmEditPostActionListenerState) {
             _updateWithEditAction(state);
+          } else if (state is IsmPostHydratedActionListenerState &&
+              state.postData != null) {
+            unawaited(_replaceReelFromTimeline(
+              state.postData!,
+              postId: state.postId,
+            ));
           }
         },
         child: BlocListener<SocialPostBloc, SocialPostState>(
@@ -352,25 +376,27 @@ class _PostItemWidgetState extends State<PostItemWidget>
   Future<void> _updateWithEditAction(
       IsmEditPostActionListenerState state) async {
     debugPrint('IsmEditPostActionListenerState: ${state.postData?.toMap()}');
-    if (state.postData != null &&
-        _reelsDataList.any((e) => e.postId == state.postId)) {
-      final index = _reelsDataList.indexWhere(
-        (element) => element.postId == state.postData!.id,
-      );
+    if (state.postData == null) return;
+    await _replaceReelFromTimeline(state.postData!, postId: state.postId);
+  }
 
-      debugPrint('IsmEditPostActionListenerState: index $index');
-      if (index != -1) {
-        final postData =
-            getReelData(state.postData!, loggedInUserId: widget.loggedInUserId);
-        final existing = _reelsDataList[index];
-        _reelsDataList[index] = postData;
-        if (_isSoftReelUpdate(existing, postData)) {
-          _updateState();
-          return;
-        }
-        await updateStateByKey(editedIndex: index);
-      }
+  Future<void> _replaceReelFromTimeline(
+    TimeLineData postData, {
+    String? postId,
+  }) async {
+    final id = postData.id ?? postId;
+    if (id == null || id.isEmpty) return;
+    if (!_reelsDataList.any((e) => e.postId == id)) return;
+    final index = _reelsDataList.indexWhere((element) => element.postId == id);
+    if (index == -1) return;
+    final mapped = getReelData(postData, loggedInUserId: widget.loggedInUserId);
+    final existing = _reelsDataList[index];
+    _reelsDataList[index] = mapped;
+    if (_isSoftReelUpdate(existing, mapped)) {
+      _updateState();
+      return;
     }
+    await updateStateByKey(editedIndex: index);
   }
 
   Future<void> _updateWithDeleteAction(
