@@ -29,6 +29,7 @@ class TabDataModel {
         allowDuplicatePostInList:
             json['allowDuplicatePostInList'] as bool? ?? false,
         lockSeededPostList: json['lockSeededPostList'] as bool? ?? false,
+        pinPostId: json['pinPostId'] as String?,
       );
 
   TabDataModel({
@@ -44,6 +45,8 @@ class TabDataModel {
     this.tagType,
     this.allowDuplicatePostInList = false,
     this.lockSeededPostList = false,
+    this.pinPostId,
+    this.playbackSession,
   });
 
   final String title;
@@ -68,6 +71,12 @@ class TabDataModel {
   String? tagValue;
   TagType? tagType;
 
+  /// When set, this post stays at index 0 while later pages load.
+  final String? pinPostId;
+
+  /// Live playhead for the post opened from a feed card. Not serialized.
+  final FeedMediaPlaybackSession? playbackSession;
+
   TabDataModel copyWith({
     String? title,
     List<TimeLineData>? reelsDataList,
@@ -81,6 +90,8 @@ class TabDataModel {
     TagType? tagType,
     bool? allowDuplicatePostInList,
     bool? lockSeededPostList,
+    String? pinPostId,
+    FeedMediaPlaybackSession? playbackSession,
   }) =>
       TabDataModel(
         title: title ?? this.title,
@@ -96,6 +107,8 @@ class TabDataModel {
         allowDuplicatePostInList:
             allowDuplicatePostInList ?? this.allowDuplicatePostInList,
         lockSeededPostList: lockSeededPostList ?? this.lockSeededPostList,
+        pinPostId: pinPostId ?? this.pinPostId,
+        playbackSession: playbackSession ?? this.playbackSession,
       );
 
   Map<String, dynamic> toJson() => {
@@ -111,6 +124,7 @@ class TabDataModel {
         'tagType': tagType?.name,
         'allowDuplicatePostInList': allowDuplicatePostInList,
         'lockSeededPostList': lockSeededPostList,
+        'pinPostId': pinPostId,
       };
 }
 

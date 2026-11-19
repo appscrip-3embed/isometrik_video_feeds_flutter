@@ -65,6 +65,7 @@ class CreateEditPostConfig {
     this.paidPostCurrency = 'coin',
     this.paidPostAmountSuggestions = const [10, 50, 100, 150],
     this.postVideoMaxDurationSeconds = 60,
+    this.postVideoMaxSizeMb = 150,
   });
 
   final CreateEditPostCallBackConfig? createEditPostCallBackConfig;
@@ -95,6 +96,10 @@ class CreateEditPostConfig {
   /// Maximum video duration (seconds) allowed when posting from gallery/camera.
   final int postVideoMaxDurationSeconds;
 
+  /// Maximum source video size (MB) allowed when posting from gallery.
+  /// Videos over this size are hidden in the create-post media grid.
+  final int postVideoMaxSizeMb;
+
   CreateEditPostConfig copyWith({
     CreateEditPostCallBackConfig? createEditPostCallBackConfig,
     CreateEditPostUIConfig? createEditPostUIConfig,
@@ -108,6 +113,7 @@ class CreateEditPostConfig {
     String? paidPostCurrency,
     List<int>? paidPostAmountSuggestions,
     int? postVideoMaxDurationSeconds,
+    int? postVideoMaxSizeMb,
   }) =>
       CreateEditPostConfig(
         createEditPostCallBackConfig:
@@ -129,6 +135,7 @@ class CreateEditPostConfig {
             paidPostAmountSuggestions ?? this.paidPostAmountSuggestions,
         postVideoMaxDurationSeconds:
             postVideoMaxDurationSeconds ?? this.postVideoMaxDurationSeconds,
+        postVideoMaxSizeMb: postVideoMaxSizeMb ?? this.postVideoMaxSizeMb,
       );
 }
 
@@ -223,6 +230,7 @@ class PostAttributeUIConfig {
     this.schedulePostConfig,
     this.scaffoldBackgroundColor,
     this.bottomBarBackgroundColor,
+    this.canDownload = true,
   });
 
   /// App bar configuration
@@ -256,6 +264,9 @@ class PostAttributeUIConfig {
   /// When null, the SDK defaults to white.
   final Color? bottomBarBackgroundColor;
 
+  /// When false, hides the "Allow Downloads" switch on the new/edit post screen.
+  final bool canDownload;
+
   PostAttributeUIConfig copyWith({
     AppBarConfig? appBarConfig,
     MediaPreviewConfig? mediaPreviewConfig,
@@ -266,6 +277,7 @@ class PostAttributeUIConfig {
     SchedulePostConfig? schedulePostConfig,
     Color? scaffoldBackgroundColor,
     Color? bottomBarBackgroundColor,
+    bool? canDownload,
   }) =>
       PostAttributeUIConfig(
         appBarConfig: appBarConfig ?? this.appBarConfig,
@@ -279,6 +291,7 @@ class PostAttributeUIConfig {
             scaffoldBackgroundColor ?? this.scaffoldBackgroundColor,
         bottomBarBackgroundColor:
             bottomBarBackgroundColor ?? this.bottomBarBackgroundColor,
+        canDownload: canDownload ?? this.canDownload,
       );
 }
 

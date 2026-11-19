@@ -252,7 +252,7 @@ class CachedVideoCacheManager implements IVideoCacheManager {
       );
     }
 
-    var url = mediaUrl;
+    var url = preserveEmptyPathSegments(mediaUrl);
     if (url.startsWith('http:')) {
       url = url.replaceFirst('http:', 'https:');
     }
@@ -570,7 +570,9 @@ class CachedVideoCacheManager implements IVideoCacheManager {
 
   @override
   Future<IVideoPlayerController?> precacheMediaAndReturnController(
-      String url) async {
+      String url, {
+        bool useFallBackControllerOnFail = true,
+      }) async {
     await precacheVideos([url]);
     return getCachedController(url);
   }

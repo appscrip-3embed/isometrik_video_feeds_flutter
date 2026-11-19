@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:ism_video_reel_player/core/errors/app_error.dart';
 import 'package:ism_video_reel_player/core/errors/error_handler.dart';
+import 'package:ism_video_reel_player/di/di.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/presentation/presentation.dart';
 import 'package:ism_video_reel_player/res/res.dart';
@@ -45,6 +46,12 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
   var _isSubmitting = false;
   String? _newPostId;
   Timer? _successAutoDismissTimer;
+  String? _editedCaption;
+  Tags? _editedTags;
+  Settings? _editedSettings;
+  var _isLoadingModeration = true;
+  var _isCaptionFlagged = false;
+  String? _captionRejectionReason;
 
   @override
   void initState() {
@@ -53,6 +60,7 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     _mediaItems = post != null
         ? PostReviewStatusUtil.allMediaItemsForRejectedPost(post)
         : _mediaItemsFromRejectedList();
+    unawaited(_loadModeration());
   }
 
   @override
@@ -140,11 +148,61 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     Navigator.of(context).pop();
   }
 
-  bool get _canResubmit => _pendingRejectedCount == 0 && _includedCount > 0;
+  bool get _hasEditedCaption {
+    if (_editedCaption == null) return false;
+    final original = (widget.data.sourcePost?.caption ?? '').trim();
+    return _editedCaption!.trim() != original;
+  }
 
-  List<PostReviewMediaItem> get _flaggedItems => _mediaItems
-      .where((e) => e.isRejected || e.isReplaced || e.isRemoved)
-      .toList();
+  bool get _isCaptionPending => _isCaptionFlagged && !_hasEditedCaption;
+
+  int get _pendingCaptionCount => _isCaptionPending ? 1 : 0;
+
+  int get _pendingIssueCount =>
+      _pendingRejectedCount + _pendingCaptionCount;
+
+  bool get _canResubmit =>
+      !_isLoadingModeration &&
+      _pendingRejectedCount == 0 &&
+      _includedCount > 0 &&
+      !_isCaptionPending;
+
+  Future<void> _loadModeration() async {
+    final postId = widget.data.postId.trim();
+    if (postId.isEmpty) {
+      if (mounted) setState(() => _isLoadingModeration = false);
+      return;
+    }
+
+    try {
+      final result =
+          await IsmInjectionUtils.getUseCase<GetLatestModerationUseCase>()
+              .executeGetLatestModeration(
+        isLoading: false,
+        contentId: postId,
+      );
+      if (!mounted) return;
+      final moderation = result.data;
+      setState(() {
+        if (moderation != null) {
+          _mediaItems = PostReviewStatusUtil.applyLatestModeration(
+            items: _mediaItems,
+            sourcePost: widget.data.sourcePost,
+            moderation: moderation,
+          );
+          _isCaptionFlagged = moderation.isCaptionFlagged;
+          _captionRejectionReason = moderation.textReport?.displayReason;
+        }
+        _isLoadingModeration = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingModeration = false);
+    }
+  }
+
+  List<PostReviewMediaItem> get _flaggedItems =>
+      _mediaItems.where((e) => e.isRejected || e.isReplaced || e.isRemoved).toList();
 
   List<PostReviewMediaItem> get _approvedItems =>
       _mediaItems.where((e) => e.isApproved).toList();
@@ -191,6 +249,9 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     final result = await RejectedPostResubmitService().submit(
       sourcePost: post,
       mediaItems: _mediaItems,
+      caption: _editedCaption,
+      tags: _editedTags,
+      settings: _editedSettings,
     );
     if (!mounted) return;
     setState(() => _isSubmitting = false);
@@ -214,8 +275,7 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
       builder: (context, constraints) {
         const stepperHeight = 32.0;
         final maxBodyHeight = constraints.maxHeight.isFinite
-            ? (constraints.maxHeight - stepperHeight)
-                .clamp(240.0, constraints.maxHeight)
+            ? (constraints.maxHeight - stepperHeight).clamp(240.0, constraints.maxHeight)
             : MediaQuery.sizeOf(context).height * 0.72;
 
         return Column(
@@ -268,22 +328,54 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
   Widget _buildReplaceStep() => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildRejectedBanner(),
-          IsrDimens.boxHeight(IsrDimens.sixteen),
-          if (_mediaItems.isNotEmpty) ...[
-            _buildMediaCarouselSection(),
-            IsrDimens.boxHeight(IsrDimens.sixteen),
-          ],
-          _buildFlaggedItemsCard(showReplaceActions: true),
-          if (widget.data.submittedAtLabel?.isNotEmpty == true) ...[
-            IsrDimens.boxHeight(IsrDimens.sixteen),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                widget.data.submittedAtLabel!,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF848484)),
+          if (_isLoadingModeration) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             ),
+          ] else ...[
+            _buildRejectedBanner(),
+            IsrDimens.boxHeight(IsrDimens.sixteen),
+            if (_mediaItems.isNotEmpty && !_isCaptionOnlyRejection) ...[
+              _buildMediaCarouselSection(),
+              IsrDimens.boxHeight(IsrDimens.sixteen),
+            ],
+            if (_isCaptionOnlyRejection) ...[
+              Text(
+                IsrTranslationFile.postDetailsAllItemsInPost,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF182028),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildApprovedMediaCards(),
+              if (_approvedItems.isNotEmpty) IsrDimens.boxHeight(IsrDimens.twelve),
+            ],
+            _buildFlaggedItemsCard(showReplaceActions: true),
+            if (_isCaptionFlagged) ...[
+              IsrDimens.boxHeight(IsrDimens.twelve),
+              _buildCaptionRejectedCard(),
+            ],
+            IsrDimens.boxHeight(IsrDimens.sixteen),
+            _buildRejectionReasonRow(),
+            if (widget.data.submittedAtLabel?.isNotEmpty == true) ...[
+              IsrDimens.boxHeight(IsrDimens.eight),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  widget.data.submittedAtLabel!,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF848484)),
+                ),
+              ),
+            ],
           ],
           IsrDimens.boxHeight(IsrDimens.sixteen),
         ],
@@ -299,6 +391,10 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
             IsrDimens.boxHeight(IsrDimens.sixteen),
           ],
           _buildFlaggedItemsCard(showReplaceActions: false),
+          if (_isCaptionFlagged) ...[
+            IsrDimens.boxHeight(IsrDimens.twelve),
+            _buildCaptionRejectedCard(),
+          ],
           IsrDimens.boxHeight(IsrDimens.sixteen),
         ],
       );
@@ -316,12 +412,14 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
   }
 
   Widget _buildRejectedBanner() {
-    if (_pendingRejectedCount == 0) {
+    if (_pendingIssueCount == 0) {
       return const SizedBox.shrink();
     }
 
-    final rejected = _pendingRejectedCount;
-    final total = _totalCount > 0 ? _totalCount : rejected;
+    final rejected = _pendingIssueCount;
+    final total = _pendingRejectedCount > 0
+        ? (_totalCount + (_isCaptionFlagged ? 1 : 0))
+        : rejected;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -360,7 +458,11 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      IsrTranslationFile.postDetailsRejectedReplaceInstruction,
+                      _pendingRejectedCount > 0
+                          ? IsrTranslationFile
+                              .postDetailsRejectedReplaceInstruction
+                          : IsrTranslationFile
+                              .postDetailsRejectedAttributeInstruction,
                       style: const TextStyle(
                         fontSize: 12,
                         color: Color(0xFFDC2626),
@@ -377,29 +479,369 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     );
   }
 
+  String get _displayRejectionReason {
+    final reason = widget.data.rejectionReason?.trim();
+    if (reason != null && reason.isNotEmpty) return reason;
+    return IsrTranslationFile.postDetailsDefaultRejectionReason;
+  }
+
+  // bool get _hasEditedAttributes =>
+  //     _editedCaption != null || _editedTags != null || _editedSettings != null;
+
+  bool get _isCaptionOnlyRejection =>
+      _isCaptionFlagged && _pendingRejectedCount == 0;
+
+  Widget _buildCaptionRejectedCard() {
+    final reason = _captionRejectionReason ??
+        IsrTranslationFile.postDetailsDefaultRejectionReason;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF5F5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.format_quote,
+              color: Color(0xFF9CA3AF),
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF182028),
+                    ),
+                    children: [
+                      TextSpan(
+                        text: '${IsrTranslationFile.postDetailsCaptionLabel} ',
+                      ),
+                      TextSpan(
+                        text: _hasEditedCaption
+                            ? IsrTranslationFile.postDetailsEditedStatusLabel
+                            : IsrTranslationFile.postDetailsRejectedStatusLabel,
+                        style: TextStyle(
+                          color: _hasEditedCaption
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFDC2626),
+                        ),
+                      ),
+                      if (_hasEditedCaption)
+                        const WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.check_circle,
+                              size: 16,
+                              color: Color(0xFF16A34A),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  reason,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF505050),
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  IsrTranslationFile.postDetailsCaptionPreviewHidden,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: Color(0xFF6B7280),
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: widget.data.sourcePost == null
+                      ? null
+                      : () => unawaited(_editAttributes()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: widget.primaryColor,
+                    side: BorderSide(color: widget.primaryColor),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    IsrTranslationFile.postDetailsEditAttributes,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: widget.primaryColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApprovedMediaCards() {
+    final items = _approvedItems;
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _buildApprovedMediaCard(items[i]),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildApprovedMediaCard(PostReviewMediaItem item) {
+    final label = item.isVideo
+        ? IsrTranslationFile.postReviewVideoLabel(item.mediaNumber)
+        : IsrTranslationFile.postReviewImageLabel(item.mediaNumber);
+    final thumbPath = item.thumbnailUrl;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 56,
+            height: 72,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: thumbPath?.isNotEmpty == true
+                  ? _buildThumbImage(thumbPath!, grayscale: false)
+                  : const ColoredBox(color: Color(0xFFE5E7EB)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF182028),
+                    ),
+                    children: [
+                      TextSpan(text: '$label '),
+                      TextSpan(
+                        text: IsrTranslationFile.postDetailsApprovedStatusLabel,
+                        style: const TextStyle(color: Color(0xFF16A34A)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.rejectionReason ??
+                      IsrTranslationFile.postDetailsApprovedContentReason(
+                        isVideo: item.isVideo,
+                      ),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF505050),
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.check,
+                        size: 14,
+                        color: Color(0xFF16A34A),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        IsrTranslationFile.postDetailsApprovedStatusLabel,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF16A34A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRejectionReasonRow() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '${IsrTranslationFile.reason}: ',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            TextSpan(text: _displayRejectionReason),
+          ],
+        ),
+        style: const TextStyle(
+          fontSize: 13,
+          color: Color(0xFF505050),
+          height: 1.45,
+        ),
+      ),
+      // const SizedBox(height: 6),
+      // if (!_isCaptionFlagged)
+      //   Row(
+      //   children: [
+      //     OutlinedButton(
+      //         onPressed: widget.data.sourcePost == null
+      //             ? null
+      //             : () => unawaited(_editAttributes()),
+      //         style: OutlinedButton.styleFrom(
+      //           foregroundColor: widget.primaryColor,
+      //           side: BorderSide(color: widget.primaryColor),
+      //           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      //           minimumSize: Size.zero,
+      //           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      //           shape: RoundedRectangleBorder(
+      //             borderRadius: BorderRadius.circular(8),
+      //           ),
+      //         ),
+      //         child: Text(
+      //           IsrTranslationFile.postDetailsEditAttributes,
+      //           style: TextStyle(
+      //             fontSize: 13,
+      //             fontWeight: FontWeight.w600,
+      //             color: widget.primaryColor,
+      //           ),
+      //         ),
+      //       ),
+      //     if (_hasEditedAttributes) ...[
+      //       const SizedBox(width: 6),
+      //       const Row(
+      //         children: [
+      //           Text(
+      //             IsrTranslationFile.postDetailsEditedStatusLabel,
+      //             style: TextStyle(
+      //               fontSize: 13,
+      //               fontWeight: FontWeight.w700,
+      //               color: Color(0xFF16A34A),
+      //             ),
+      //           ),
+      //           SizedBox(width: 4),
+      //           Icon(
+      //             Icons.check_circle,
+      //             size: 16,
+      //             color: Color(0xFF16A34A),
+      //           ),
+      //         ],
+      //       ),
+      //     ],
+      //   ],
+      // ),
+    ],
+  );
+
+  Future<void> _editAttributes() async {
+    final post = widget.data.sourcePost;
+    if (post == null) return;
+
+    final postForEdit = post.copyWith(
+      caption: _editedCaption ?? post.caption,
+      tags: _editedTags ?? post.tags,
+      settings: _editedSettings ?? post.settings,
+    );
+    final result = await IsrAppNavigator.goToEditPostView(
+      context,
+      postData: postForEdit,
+      popWithSavedAttributes: true,
+    );
+    if (!mounted) return;
+    if (result is! RejectedPostEditedAttributes) return;
+
+    setState(() {
+      _editedCaption = result.caption;
+      _editedTags = result.tags;
+      _editedSettings = result.settings;
+    });
+  }
+
   Widget _buildReviewBanner() {
     final replacedLabels = _mediaItems
         .where((e) => e.isReplaced)
         .map(
-          (e) => e.isVideo
-              ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
-              : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
-        )
+          (e) =>
+      e.isVideo
+          ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
+          : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
+    )
         .toList();
     final removedLabels = _mediaItems
         .where((e) => e.isRemoved)
         .map(
-          (e) => e.isVideo
-              ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
-              : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
-        )
+          (e) =>
+      e.isVideo
+          ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
+          : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
+    )
         .toList();
     final approvedLabels = _approvedItems
         .map(
-          (e) => e.isVideo
-              ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
-              : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
-        )
+          (e) =>
+      e.isVideo
+          ? IsrTranslationFile.postReviewVideoLabel(e.mediaNumber)
+          : IsrTranslationFile.postReviewImageLabel(e.mediaNumber),
+    )
         .toList();
 
     final titleParts = <String>[
@@ -465,7 +907,8 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
             scrollDirection: Axis.horizontal,
             itemCount: items.length,
             separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, index) => _buildMediaThumb(items[index]),
+            itemBuilder: (context, index) =>
+                _buildMediaThumb(items[index]),
           ),
         ),
       ],
@@ -476,7 +919,7 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     final isRejected = item.isRejected;
     final isApproved = item.isApproved || item.isReplaced;
     final borderColor =
-        isRejected ? const Color(0xFFDC2626) : const Color(0xFF22C55E);
+    isRejected ? const Color(0xFFDC2626) : const Color(0xFF22C55E);
     final thumbPath = item.replacementLocalPath ?? item.thumbnailUrl;
 
     return Container(
@@ -603,8 +1046,7 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     );
   }
 
-  Widget _buildFlaggedItemRow(
-    PostReviewMediaItem item, {
+  Widget _buildFlaggedItemRow(PostReviewMediaItem item, {
     required bool showReplaceAction,
   }) {
     final label = item.isVideo
@@ -613,13 +1055,13 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
     final statusLabel = item.isReplaced
         ? IsrTranslationFile.postDetailsReplacedStatusLabel
         : item.isRemoved
-            ? IsrTranslationFile.postDetailsRemovedStatusLabel
-            : IsrTranslationFile.postDetailsRejectedStatusLabel;
+        ? IsrTranslationFile.postDetailsRemovedStatusLabel
+        : IsrTranslationFile.postDetailsRejectedStatusLabel;
     final statusColor = item.isReplaced
         ? const Color(0xFF16A34A)
         : item.isRemoved
-            ? const Color(0xFF6B7280)
-            : const Color(0xFFDC2626);
+        ? const Color(0xFF6B7280)
+        : const Color(0xFFDC2626);
     final thumbPath = item.replacementLocalPath ?? item.thumbnailUrl;
 
     return Row(
@@ -635,21 +1077,21 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
                 child: SizedBox.expand(
                   child: thumbPath?.isNotEmpty == true
                       ? _buildThumbImage(
-                          thumbPath!,
-                          grayscale: item.isRejected || item.isRemoved,
-                        )
+                    thumbPath!,
+                    grayscale: item.isRejected || item.isRemoved,
+                  )
                       : ColoredBox(
-                          color: const Color(0xFFE5E7EB),
-                          child: Center(
-                            child: Icon(
-                              item.isVideo
-                                  ? Icons.videocam
-                                  : Icons.image_outlined,
-                              color: const Color(0xFF9CA3AF),
-                              size: 22,
-                            ),
-                          ),
-                        ),
+                    color: const Color(0xFFE5E7EB),
+                    child: Center(
+                      child: Icon(
+                        item.isVideo
+                            ? Icons.videocam
+                            : Icons.image_outlined,
+                        color: const Color(0xFF9CA3AF),
+                        size: 22,
+                      ),
+                    ),
+                  ),
                 ),
               ),
               Positioned(
@@ -838,8 +1280,8 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
                 onPressed: secondaryEnabled ? onSecondary : null,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: secondaryColor,
-                  disabledForegroundColor:
-                      secondaryColor.withValues(alpha: 0.45),
+                  disabledForegroundColor: secondaryColor.withValues(
+                      alpha: 0.45),
                   backgroundColor: Colors.white,
                   disabledBackgroundColor: Colors.white,
                   side: BorderSide(
@@ -872,7 +1314,7 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
                   backgroundColor: widget.primaryColor,
                   foregroundColor: Colors.white,
                   disabledBackgroundColor:
-                      widget.primaryColor.withValues(alpha: 0.45),
+                  widget.primaryColor.withValues(alpha: 0.45),
                   disabledForegroundColor: Colors.white.withValues(alpha: 0.8),
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -881,23 +1323,23 @@ class _RejectedPostDetailsFlowState extends State<RejectedPostDetailsFlow> {
                   ),
                 ),
                 child:
-                    _isSubmitting && primaryLabel == IsrTranslationFile.submit
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text(
-                            primaryLabel,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
+                _isSubmitting && primaryLabel == IsrTranslationFile.submit
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+                    : Text(
+                  primaryLabel,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
               ),
             ),
           ],

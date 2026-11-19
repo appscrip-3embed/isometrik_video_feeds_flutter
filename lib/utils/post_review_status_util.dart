@@ -23,9 +23,7 @@ class PostReviewStatusUtil {
     if (normalized.contains('resubmit')) {
       return PostReviewStatus.resubmitted;
     }
-    if (normalized.contains('review') ||
-        normalized.contains('pending') ||
-        postStatus == 1) {
+    if (normalized.contains('review') || normalized.contains('pending') || postStatus == 1) {
       return PostReviewStatus.inReview;
     }
     if (normalized.contains('schedule')) {
@@ -49,10 +47,7 @@ class PostReviewStatusUtil {
 
     final status = (post.status ?? '').toLowerCase().trim();
     if (status.isEmpty) return true;
-    return status == 'published' ||
-        status == 'active' ||
-        status == 'live' ||
-        status == 'approved';
+    return status == 'published' || status == 'active' || status == 'live' || status == 'approved';
   }
 
   /// Status shown on grid tiles when [isPublished] is false.
@@ -98,19 +93,24 @@ class PostReviewStatusUtil {
   }
 
   static String thumbnailUrl(TimeLineData post) {
-    final preview = post.previews?.firstOrNull?.url;
-    if (preview != null && preview.isNotEmpty) return preview;
+    final preview = post.previews
+        ?.map((e) => e.url ?? '')
+        .where((url) => url.isNotEmpty)
+        .firstOrNull;
+    if (preview != null) return preview;
 
     final imageMedia = post.media
         ?.where((e) => (e.mediaType ?? '').toLowerCase() != 'video')
+        .where((e) => e.url?.isNotEmpty == true)
         .firstOrNull;
-    if (imageMedia?.url?.isNotEmpty == true) {
-      return imageMedia!.url ?? '';
+    if (imageMedia?.url != null) {
+      return imageMedia!.url!;
     }
 
-    return post.media?.firstOrNull?.previewUrl ??
-        post.media?.firstOrNull?.url ??
-        '';
+    final media = post.media?.firstOrNull;
+    final mediaPreview = media?.previewUrl ?? '';
+    if (mediaPreview.isNotEmpty) return mediaPreview;
+    return media?.url ?? '';
   }
 
   static PostDetailsSheetData sheetDataFromTimeLineData(
@@ -118,7 +118,7 @@ class PostReviewStatusUtil {
     PostReviewStatus status,
   ) {
     final previewUrl = thumbnailUrl(post);
-    final rejectedItems = _rejectedItemsFromPost(post, sheetStatus: status);
+    final rejectedItems = _rejectedItemsFromPost(post);
     final totalMediaCount = _totalMediaCount(post);
     final postRejectionReason = _postRejectionReason(post);
 
@@ -147,17 +147,10 @@ class PostReviewStatusUtil {
               post.scheduledAt,
             )
           : null,
-      rejectedCount: rejectedItems.isNotEmpty
-          ? rejectedItems.length
-          : (status == PostReviewStatus.rejected &&
-                  !_hasModerationResults(post) &&
-                  totalMediaCount > 0
-              ? totalMediaCount
-              : null),
+      rejectedCount: rejectedItems.isNotEmpty ? rejectedItems.length : null,
       totalMediaCount: totalMediaCount > 0 ? totalMediaCount : null,
       rejectedItems: rejectedItems,
-      rejectionReason:
-          postRejectionReason.isNotEmpty ? postRejectionReason : null,
+      rejectionReason: postRejectionReason.isNotEmpty ? postRejectionReason : null,
     );
   }
 
@@ -177,24 +170,14 @@ class PostReviewStatusUtil {
         normalized.contains('blocked');
   }
 
-  static bool _isPostRejected(TimeLineData post,
-      {PostReviewStatus? sheetStatus}) {
-    if (sheetStatus == PostReviewStatus.rejected) return true;
-    return _isRejectedModerationStatus(post.status);
-  }
-
   static bool _hasModerationResults(TimeLineData post) =>
       post.media?.any((m) => m.moderationResult != null) == true;
 
   static bool _isMediaFlagged(MediaData item) =>
       (item.moderationResult?.result ?? '').toLowerCase().trim() == 'flagged';
 
-  static List<PostReviewRejectedItem> _rejectedItemsFromPost(
-    TimeLineData post, {
-    PostReviewStatus? sheetStatus,
-  }) {
+  static List<PostReviewRejectedItem> _rejectedItemsFromPost(TimeLineData post) {
     final media = post.media ?? [];
-    final postRejected = _isPostRejected(post, sheetStatus: sheetStatus);
     final postReason = _postRejectionReason(post);
 
     if (media.isNotEmpty) {
@@ -212,41 +195,10 @@ class PostReviewStatusUtil {
       for (var i = 0; i < media.length; i++) {
         final item = media[i];
         final moderation = (item.moderationStatus ?? '').toLowerCase().trim();
-        final isRejected = _isRejectedModerationStatus(moderation) ||
-            (postRejected && moderation.isEmpty);
-
-        if (!isRejected) continue;
+        if (!_isRejectedModerationStatus(moderation)) continue;
         items.add(_mediaToRejectedItem(item, i, fallbackReason: postReason));
       }
-
-      if (items.isEmpty && postRejected) {
-        return media
-            .asMap()
-            .entries
-            .map((e) => _mediaToRejectedItem(e.value, e.key,
-                fallbackReason: postReason))
-            .toList();
-      }
       return items;
-    }
-
-    if (postRejected && (post.previews?.isNotEmpty == true)) {
-      return post.previews!.asMap().entries.map((e) {
-        final index = e.key;
-        final preview = e.value;
-        final isVideo = (preview.mediaType ?? '').toLowerCase() == 'video';
-        final mediaNumber = (preview.position ?? index + 1).toInt();
-        return PostReviewRejectedItem(
-          label: isVideo
-              ? IsrTranslationFile.postReviewVideoLabel(mediaNumber)
-              : IsrTranslationFile.postReviewImageLabel(mediaNumber),
-          reason: postReason.isNotEmpty
-              ? postReason
-              : IsrTranslationFile.postDetailsDefaultRejectionReason,
-          thumbnailUrl: preview.url,
-          isVideo: isVideo,
-        );
-      }).toList();
     }
 
     return const [];
@@ -262,9 +214,8 @@ class PostReviewStatusUtil {
     final label = isVideo
         ? IsrTranslationFile.postReviewVideoLabel(mediaNumber)
         : IsrTranslationFile.postReviewImageLabel(mediaNumber);
-    final thumbnail = isVideo
-        ? (media.previewUrl?.isNotEmpty == true ? media.previewUrl : media.url)
-        : media.url;
+    final thumbnail =
+        isVideo ? (media.previewUrl?.isNotEmpty == true ? media.previewUrl : media.url) : media.url;
     final moderationDetails = (media.moderationResult?.details ?? '').trim();
     final reason = (media.rejectionReason ?? '').trim();
 
@@ -292,9 +243,7 @@ class PostReviewStatusUtil {
   static String _mediaThumbnail(MediaData media) {
     final isVideo = _isVideoMedia(media);
     if (isVideo) {
-      return media.previewUrl?.isNotEmpty == true
-          ? media.previewUrl!
-          : (media.url ?? '');
+      return media.previewUrl?.isNotEmpty == true ? media.previewUrl! : (media.url ?? '');
     }
     return media.url ?? '';
   }
@@ -315,15 +264,12 @@ class PostReviewStatusUtil {
     if (_hasModerationResults(post)) {
       return _isMediaFlagged(item);
     }
-    final postRejected = _isPostRejected(post);
     final moderation = (item.moderationStatus ?? '').toLowerCase().trim();
-    if (_isRejectedModerationStatus(moderation)) return true;
-    return postRejected && moderation.isEmpty;
+    return _isRejectedModerationStatus(moderation);
   }
 
   /// All carousel items for the rejected-post details UI (approved + flagged).
-  static List<PostReviewMediaItem> allMediaItemsForRejectedPost(
-      TimeLineData post) {
+  static List<PostReviewMediaItem> allMediaItemsForRejectedPost(TimeLineData post) {
     final media = post.media ?? [];
     if (media.isEmpty) return const [];
 
@@ -343,9 +289,7 @@ class PostReviewStatusUtil {
             : PostReviewMediaItemState.approved,
         thumbnailUrl: _mediaThumbnail(item),
         isVideo: isVideo,
-        rejectionReason: rejected
-            ? _rejectionReasonForMedia(item, fallbackReason: postReason)
-            : null,
+        rejectionReason: rejected ? _rejectionReasonForMedia(item, fallbackReason: postReason) : null,
       );
     }).toList();
   }
@@ -384,6 +328,45 @@ class PostReviewStatusUtil {
     }
   }
 
+  /// Applies latest-moderation media reports onto carousel items.
+  static List<PostReviewMediaItem> applyLatestModeration({
+    required List<PostReviewMediaItem> items,
+    required TimeLineData? sourcePost,
+    required PostModerationData moderation,
+  }) {
+    if (moderation.mediaReports.isEmpty) return items;
+    final sourceMedia = sourcePost?.media ?? [];
+    return items.map((item) {
+      if (item.isReplaced || item.isRemoved) return item;
+      final source = (item.sourceIndex >= 0 && item.sourceIndex < sourceMedia.length)
+          ? sourceMedia[item.sourceIndex]
+          : null;
+      final report = moderation.mediaReportFor(
+        index: item.sourceIndex,
+        url: source?.url ?? item.thumbnailUrl,
+        assetId: source?.assetId,
+      );
+      if (report == null) return item;
+      if (report.isFlagged) {
+        return item.copyWith(
+          state: PostReviewMediaItemState.rejected,
+          rejectionReason: (report.details ?? '').trim().isNotEmpty
+              ? report.details
+              : item.rejectionReason,
+        );
+      }
+      if (report.isApproved) {
+        return item.copyWith(
+          state: PostReviewMediaItemState.approved,
+          rejectionReason: IsrTranslationFile.postDetailsApprovedContentReason(
+            isVideo: item.isVideo,
+          ),
+        );
+      }
+      return item;
+    }).toList();
+  }
+
   /// Whether this media item should be included when resubmitting a rejected post.
   static bool isMediaApprovedForResubmit(MediaData item, TimeLineData post) {
     if (_hasModerationResults(post)) {
@@ -394,10 +377,8 @@ class PostReviewStatusUtil {
       }
       return true;
     }
-    final postRejected = _isPostRejected(post);
     final moderation = (item.moderationStatus ?? '').toLowerCase().trim();
     if (_isRejectedModerationStatus(moderation)) return false;
-    if (postRejected && moderation.isEmpty) return false;
     return true;
   }
 

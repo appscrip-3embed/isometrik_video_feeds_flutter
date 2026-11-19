@@ -27,6 +27,7 @@ class PostAttributeView extends StatefulWidget {
     this.selectedSound,
     this.dismissEntireFlowOnClose = false,
     this.isRejectedResubmit = false,
+    this.popWithSavedAttributes = false,
   });
 
   final bool? isEditMode;
@@ -34,6 +35,10 @@ class PostAttributeView extends StatefulWidget {
   final MediaEditSoundItem? selectedSound;
   final TimeLineData? postData;
   final bool isRejectedResubmit;
+
+  /// When true, the primary button saves caption/tags and pops instead of
+  /// creating or updating a post. Used by rejected-post attribute edit.
+  final bool popWithSavedAttributes;
 
   /// When true, close/success dismisses every create-post route (e.g. dub flow
   /// with a media editor still on the stack). The default stacked coordinator
@@ -70,6 +75,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
 
   /// User ids passed into [TagPeopleScreen]; cleared after applying its result.
   Set<String> _tagPeopleManagedUserIds = {};
+  var _userEditedMentions = false;
+  var _userEditedPlaces = false;
 
   // Original values for comparison in edit mode
   PostAttributeClass? _originalPostAttributeClass;
@@ -933,17 +940,18 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
                         ),
 
                         // Allow Downloads
-                        _buildSwitchTile(
-                          icon: AssetConstants.icAllowSave,
-                          title: IsrTranslationFile.allowDownloads,
-                          value: _postAttributeClass?.allowDownload == true,
-                          onChanged: (value) {
-                            setState(() {
-                              _postAttributeClass?.allowDownload = value;
-                            });
-                            _updatePostButtonState();
-                          },
-                        ),
+                        if (_postAttributeConfig?.canDownload ?? true)
+                          _buildSwitchTile(
+                            icon: AssetConstants.icAllowSave,
+                            title: IsrTranslationFile.allowDownloads,
+                            value: _postAttributeClass?.allowDownload == true,
+                            onChanged: (value) {
+                              setState(() {
+                                _postAttributeClass?.allowDownload = value;
+                              });
+                              _updatePostButtonState();
+                            },
+                          ),
 
                         // Schedule Post (only if not in edit mode)
                         if (!_isEditMode) _buildSchedulePostTile(),
@@ -974,7 +982,9 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
               ),
               child: SafeArea(
                 child: AppButton(
-                  title: IsrTranslationFile.post,
+                  title: widget.popWithSavedAttributes
+                      ? IsrTranslationFile.save
+                      : IsrTranslationFile.post,
                   isDisable: !_isPostButtonEnabled,
                   onPress: _isPostButtonEnabled ? _createPost : null,
                   borderRadius: _postAttributeConfig?.postButtonConfig?.borderRadius ??
@@ -1148,6 +1158,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
           onAddMentionData: (mentionData) {
             final md = _mentionDataFromComment(mentionData);
             if (!_mentionedUsers.any((u) => u.userId == md.userId)) {
+              _userEditedMentions = true;
               _mentionedUsers.add(md);
               _syncMentionDataToBloc();
             }
@@ -1155,6 +1166,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
           },
           onRemoveMentionData: (mentionData) {
             final md = _mentionDataFromComment(mentionData);
+            _userEditedMentions = true;
             _mentionedUsers.removeWhere((u) => u.userId == md.userId);
             _syncMentionDataToBloc();
             debugPrint('_mentionedUsers: ${jsonEncode(_mentionedUsers)}');
@@ -1183,15 +1195,21 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   List<MentionData> _getTaggedUsers() =>
       _mentionedUsers.where((m) => !_isCaptionOnlyMention(m)).toList(growable: false);
 
+  bool _hasMediaPosition(MentionData mention) {
+    final mediaPosition = mention.mediaPosition;
+    if (mediaPosition == null) return false;
+    final position = mediaPosition.position?.toInt() ?? 0;
+    if (position > 0) return true;
+    final x = mediaPosition.x ?? 0;
+    final y = mediaPosition.y ?? 0;
+    return x != 0 || y != 0;
+  }
+
   bool _isCaptionOnlyMention(MentionData mention) {
+    if (_hasMediaPosition(mention)) return false;
     final textPosition = mention.textPosition;
     if (textPosition != null && !(textPosition.start == 0 && textPosition.end == 0)) {
-      return true; // has caption position
-    }
-    final mediaPosition = mention.mediaPosition;
-    if (mediaPosition != null &&
-        !(mediaPosition.x == 0 && mediaPosition.y == 0 && mediaPosition.position == 0)) {
-      return false; // has media position
+      return true;
     }
     final username = (mention.username ?? '').replaceFirst('@', '');
     if (username.isEmpty) return false;
@@ -1200,12 +1218,29 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
 
   /// Replaces media tags from [TagPeopleScreen] while keeping caption @mentions.
   void _applyTagPeopleScreenResult(List<MentionData> mediaTags) {
+    final previousByUserId = <String, MentionData>{
+      for (final mention in _mentionedUsers)
+        if ((mention.userId ?? '').isNotEmpty) mention.userId!: mention,
+    };
     final captionMentionsToKeep =
         _mentionedUsers.where(_isCaptionOnlyMention).toList(growable: false);
 
+    _userEditedMentions = true;
     _mentionedUsers.removeWhere(
       (m) => _tagPeopleManagedUserIds.contains(m.userId ?? ''),
     );
+    for (final mediaTag in mediaTags) {
+      final previous = previousByUserId[mediaTag.userId];
+      if (previous == null) continue;
+      mediaTag.textPosition ??= previous.textPosition;
+      if (mediaTag.name?.trim().isNotEmpty != true) mediaTag.name = previous.name;
+      if (mediaTag.avatarUrl?.trim().isNotEmpty != true) {
+        mediaTag.avatarUrl = previous.avatarUrl;
+      }
+      if (mediaTag.username?.trim().isNotEmpty != true) {
+        mediaTag.username = previous.username;
+      }
+    }
     _mentionedUsers.addAll(mediaTags);
     _tagPeopleManagedUserIds = {};
 
@@ -1266,6 +1301,30 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     }
   }
 
+  String _locationTitle(TaggedPlace? place) {
+    if (place == null) return IsrTranslationFile.addLocation;
+    final name = place.placeName?.trim() ?? '';
+    final city = place.city?.trim() ?? '';
+    if (name.isNotEmpty && city.isNotEmpty && name != city) return '$name, $city';
+    if (name.isNotEmpty) return name;
+    final address = place.address?.trim() ?? '';
+    if (address.isNotEmpty) return address;
+    final description = place.placeData?.description?.trim() ?? '';
+    if (description.isNotEmpty) return description;
+    if (city.isNotEmpty) return city;
+    return IsrTranslationFile.addLocation;
+  }
+
+  String? _locationSubtitle(TaggedPlace? place) {
+    if (place == null) return null;
+    final parts = [place.state, place.country]
+        .map((part) => part?.trim() ?? '')
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return null;
+    return parts.join(', ');
+  }
+
   /// Build location tile with proper alignment and text handling
   Widget _buildLocationTile() {
     final hasLocation = _postAttributeClass?.taggedPlaces?.isNotEmpty == true;
@@ -1273,10 +1332,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     final taggedPlace = _postAttributeClass?.taggedPlaces?.firstOrNull;
     return _buildOptionTile(
       icon: AssetConstants.icPostLocation,
-      title: hasLocation
-          ? '${taggedPlace?.placeName}${taggedPlace?.placeName == taggedPlace?.city ? '' : ', ${taggedPlace?.city}'}'
-          : IsrTranslationFile.addLocation,
-      subtitle: hasLocation ? '${taggedPlace?.state}, ${taggedPlace?.country}' : null,
+      title: hasLocation ? _locationTitle(taggedPlace) : IsrTranslationFile.addLocation,
+      subtitle: hasLocation ? _locationSubtitle(taggedPlace) : null,
       trailing: Icon(
         hasLocation ? Icons.close : Icons.chevron_right,
         color: IsrColors.primaryTextColor,
@@ -1289,6 +1346,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
             await IsrAppNavigator.goToSearchLocation(context, taggedPlaceList: taggedPlaces);
 
         if (result != null) {
+          _userEditedPlaces = true;
           _postAttributeClass?.taggedPlaces = result;
           setState(() {});
           _updatePostButtonState();
@@ -1298,6 +1356,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
           ? null
           : () async {
               taggedPlace?.let((place) {
+                _userEditedPlaces = true;
                 setState(() {
                   _postAttributeClass?.taggedPlaces?.remove(place);
                 });
@@ -1838,6 +1897,23 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     return true;
   }
 
+  List<MentionData> _mentionsForSave(List<MentionData> edited) {
+    if (_userEditedMentions || edited.isNotEmpty) return edited;
+    final source = _createPostBloc.editSourceMentions;
+    if (source.isEmpty) return edited;
+    return List<MentionData>.from(source);
+  }
+
+  List<TaggedPlace>? _placesForSave() {
+    final edited = _postAttributeClass?.taggedPlaces;
+    if (_userEditedPlaces || (edited != null && edited.isNotEmpty)) {
+      return edited ?? <TaggedPlace>[];
+    }
+    final source = _createPostBloc.editSourcePlaces;
+    if (source.isNotEmpty) return List<TaggedPlace>.from(source);
+    return edited;
+  }
+
   /// Sync mention data to bloc
   void _syncMentionDataToBloc() {
     debugPrint('=== _syncMentionDataToBloc START ===');
@@ -1943,6 +2019,10 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
       return;
     }
     _setPostRequest();
+    if (widget.popWithSavedAttributes) {
+      _popWithSavedAttributes();
+      return;
+    }
     final selectedSound =
         _pendingSelectedSound ?? widget.selectedSound ?? _postAttributeClass?.selectedSound;
     context.getOrCreateBloc<CreatePostBloc>().add(PostCreateEvent(
@@ -1950,6 +2030,35 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
           selectedSound: selectedSound,
           isForEdit: widget.isRejectedResubmit ? false : _isEditMode,
         ));
+  }
+
+  void _popWithSavedAttributes() {
+    final request = _postAttributeClass?.createPostRequest;
+    Navigator.of(context).pop(
+      RejectedPostEditedAttributes(
+        caption: request?.caption ?? _descriptionController.text,
+        tags: request?.tags,
+        settings: _mergedSettingsForPop(request?.settings),
+      ),
+    );
+  }
+
+  Settings _mergedSettingsForPop(PostSettingModel? edited) {
+    final original = widget.postData?.settings;
+    return Settings(
+      commentsEnabled: edited?.commentsEnabled ?? original?.commentsEnabled,
+      duetEnabled: edited?.duetEnabled ?? original?.duetEnabled,
+      stitchEnabled: edited?.stitchEnabled ?? original?.stitchEnabled,
+      saveEnabled: edited?.saveEnabled ?? original?.saveEnabled,
+      downloadEnabled: edited?.downloadEnabled ?? original?.downloadEnabled,
+      isPaid: edited?.isPaid ?? original?.isPaid,
+      priceAmount: edited?.priceAmount ?? original?.priceAmount,
+      priceCurrency: edited?.priceCurrency ?? original?.priceCurrency,
+      ageRestriction: edited?.ageRestriction ?? original?.ageRestriction,
+      autoAdvance: edited?.autoAdvance ?? original?.autoAdvance,
+      advanceInterval: edited?.advanceInterval ?? original?.advanceInterval,
+      audioSettings: original?.audioSettings,
+    );
   }
 
   void _applySoundToCreatePostRequest() {
@@ -2007,6 +2116,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
       );
       createPostRequest.settings = settings;
 
+      createPostRequest.caption = _descriptionController.text;
+
       // Set schedule time if post is scheduled
       if (_isEditMode == false && _selectedDate != null) {
         // Check if selected date is today
@@ -2032,15 +2143,20 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
       _mentionedUsers
         ..clear()
         ..addAll(dedupedMentions);
-      _postAttributeClass?.mentionedUserList = List<MentionData>.from(dedupedMentions);
-      tags.mentions = List<MentionData>.from(dedupedMentions);
+      final mentionsForRequest =
+          _isEditMode ? _mentionsForSave(dedupedMentions) : dedupedMentions;
+      _postAttributeClass?.mentionedUserList = List<MentionData>.from(mentionsForRequest);
+      tags.mentions = List<MentionData>.from(mentionsForRequest);
       if (_hashTags.isNotEmpty) {
         tags.hashtags = _hashTags;
       } else if (_postAttributeClass?.hashTagDataList?.isEmptyOrNull == false) {
         tags.hashtags = _postAttributeClass?.hashTagDataList;
       }
-      if (_postAttributeClass?.taggedPlaces.isEmptyOrNull == false) {
-        tags.places = _postAttributeClass?.taggedPlaces;
+      final placesForRequest = _placesForSave();
+      if (_isEditMode) {
+        tags.places = placesForRequest ?? <TaggedPlace>[];
+      } else if (placesForRequest.isEmptyOrNull == false) {
+        tags.places = placesForRequest;
       }
       if (_linkedProducts.isNotEmpty) {
         _postAttributeClass?.linkedProducts = _linkedProducts;
