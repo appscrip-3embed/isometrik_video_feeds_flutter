@@ -1083,7 +1083,13 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
 
     final myUserId = await _localDataUseCase.getUserId();
     if (event.onComplete != null) {
-      event.onComplete?.call(finalCommentList ?? []);
+      final totalComments = apiResult.data?.totalComments?.toInt() ??
+          finalCommentList?.length ??
+          0;
+      event.onComplete?.call(
+        finalCommentList ?? [],
+        total: totalComments,
+      );
     } else {
       emit(LoadPostCommentState(
         postCommentsList: finalCommentList,

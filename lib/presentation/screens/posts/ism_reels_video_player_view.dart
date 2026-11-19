@@ -317,6 +317,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   TextSpan? _cachedDescriptionTextSpan;
   String? _lastParsedDescription;
   List<CommentDataItem> _floatingComments = [];
+  /// Total comments on the post (from API / engagement metrics), used to
+  /// decide when to show "View all comments" vs only the preview rows.
+  int _floatingCommentsTotal = 0;
   bool _hasFetchedFloatingComments = false;
 
   bool _showLikeAnimation = false;
@@ -705,6 +708,12 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                     _belowCommentsConfig?.maxVisibleComments ?? 2;
                 _floatingComments =
                     sortedComments.take(maxVisibleComments).toList();
+                final engagementTotal = _reelData.commentCount ?? 0;
+                _floatingCommentsTotal = [
+                  total,
+                  engagementTotal,
+                  sortedComments.length,
+                ].reduce((a, b) => a > b ? a : b);
               });
             },
           ),
@@ -3071,6 +3080,12 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     final commentSpacing =
         _belowCommentsConfig?.commentSpacing ?? IsrDimens.four;
     final maxLinesPerComment = _belowCommentsConfig?.maxLinesPerComment ?? 2;
+    final maxVisibleComments =
+        _belowCommentsConfig?.maxVisibleComments ?? 2;
+    final totalComments = _floatingCommentsTotal > 0
+        ? _floatingCommentsTotal
+        : (_reelData.commentCount ?? _floatingComments.length);
+    final showViewAllComments = totalComments > maxVisibleComments;
     final viewAllCommentsText =
         _belowCommentsConfig?.viewAllCommentsText ?? 'View all comments';
     final animationDuration = Duration(
@@ -3139,13 +3154,14 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
                 ),
               );
             }),
-            TapHandler(
-              onTap: _handleCommentClick,
-              child: Text(
-                viewAllCommentsText,
-                style: buttonStyle,
+            if (showViewAllComments)
+              TapHandler(
+                onTap: _handleCommentClick,
+                child: Text(
+                  viewAllCommentsText,
+                  style: buttonStyle,
+                ),
               ),
-            ),
           ],
         ),
       ),
