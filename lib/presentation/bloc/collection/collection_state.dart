@@ -177,3 +177,9 @@ class RemovePostFromCollectionErrorState extends CollectionState {
 
   final String error;
 }
+
+class MoveToCollectionErrorState extends CollectionState {
+  MoveToCollectionErrorState({required this.error});
+
+  final String error;
+}

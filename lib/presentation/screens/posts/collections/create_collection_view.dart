@@ -117,6 +117,8 @@ class _CreateCollectionViewState extends State<CreateCollectionView> {
             } else if (state is CreateCollectionErrorState) {
               debugPrint('CreateCollectionErrorState received: ${state.error}');
               Utility.showToastMessage(state.error);
+            } else if (state is MoveToCollectionErrorState) {
+              Utility.showToastMessage(state.error);
             } else if (state is EditCollectionSuccessState) {
               debugPrint(
                   'EditCollectionSuccessState received - dismissing bottom sheet');
@@ -153,6 +155,8 @@ class _CreateCollectionViewState extends State<CreateCollectionView> {
               localImage.value = state.localFile;
               FocusManager.instance.primaryFocus?.unfocus();
               enableCreatebtn();
+            } else if (state is CollectionImageUpdateErrorState) {
+              Utility.showToastMessage(state.error);
             }
           },
           child: Padding(

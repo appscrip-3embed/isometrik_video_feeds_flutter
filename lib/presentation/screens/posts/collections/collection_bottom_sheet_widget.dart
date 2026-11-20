@@ -155,6 +155,12 @@ class _CollectionBottomSheetWidgetState
                       '${(names.length - 1) > 1 ? 'collections' : 'collection'}';
 
               Utility.showToastMessage(message);
+            } else if (state is MoveToCollectionErrorState) {
+              Utility.showToastMessage(state.error);
+            } else if (state is ModifyUserCollectionErrorState) {
+              Utility.showToastMessage(state.error);
+            } else if (state is UserCollectionErrorState) {
+              Utility.showToastMessage(state.error);
             }
           },
           child: Container(
@@ -294,6 +300,16 @@ class _CollectionBottomSheetWidgetState
                                 selectedCollectionIds,
                               );
                             },
+                          ),
+                        );
+                      } else if (state is UserCollectionErrorState) {
+                        return Center(
+                          child: Text(
+                            state.error,
+                            textAlign: TextAlign.center,
+                            style: IsrStyles.primaryText14.copyWith(
+                              color: CollectionThemeResolver.textSecondary,
+                            ),
                           ),
                         );
                       }
@@ -485,7 +501,8 @@ class _CollectionBottomSheetWidgetState
       bloc: _collectionBloc,
       listenWhen: (previous, current) =>
           current is SavedPostDataSuccessState ||
-          current is SavedPostDataErrorState,
+          current is SavedPostDataErrorState ||
+          current is SavePostErrorState,
       listener: (context, state) {
         if (state is SavedPostDataSuccessState ||
             state is SavedPostDataErrorState) {

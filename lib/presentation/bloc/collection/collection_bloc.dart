@@ -68,7 +68,9 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       emit(
           UserCollectionFetchState(collectionList: apiResult.data?.data ?? []));
     } else {
-      emit(UserCollectionErrorState(apiResult.error?.message ?? ''));
+      emit(UserCollectionErrorState(
+        readableCollectionApiError(apiResult.error?.message),
+      ));
     }
   }
 
@@ -89,7 +91,9 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
         collectionNames: event.collectionRequestModel.collectionName ?? [],
       ));
     } else {
-      emit(ModifyUserCollectionErrorState(apiResult.error?.message ?? ''));
+      emit(ModifyUserCollectionErrorState(
+        readableCollectionApiError(apiResult.error?.message),
+      ));
     }
   }
 
@@ -136,10 +140,14 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
           collectionId: collectionId,
         ));
       } else {
-        emit(CreateCollectionErrorState(apiResult.error?.message ?? ''));
+        emit(CreateCollectionErrorState(
+          readableCollectionApiError(apiResult.error?.message),
+        ));
       }
     } else {
-      emit(CreateCollectionErrorState(IsrTranslationFile.somethingWentWrong));
+      emit(CreateCollectionErrorState(
+        readableCollectionApiError(apiResult.error?.message),
+      ));
     }
   }
 
@@ -166,7 +174,9 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
         debugPrint('Failed to notify collection creation listener: $_');
       }
     } else {
-      emit(EditCollectionErrorState(apiResult.error?.message ?? ''));
+      emit(EditCollectionErrorState(
+        readableCollectionApiError(apiResult.error?.message),
+      ));
     }
   }
 
@@ -317,8 +327,7 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
               event.isSaved ? SocialPostAction.unSave : SocialPostAction.save));
     } else {
       emit(SavePostErrorState(
-        message:
-            apiResult.error?.message ?? IsrTranslationFile.somethingWentWrong,
+        message: readableCollectionApiError(apiResult.error?.message),
       ));
     }
   }
@@ -424,6 +433,10 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
         limit: 10,
         postId: event.postId,
       ));
+    } else {
+      emit(MoveToCollectionErrorState(
+        error: readableCollectionApiError(apiResult.error?.message),
+      ));
     }
   }
 
@@ -445,8 +458,7 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       ));
     } else {
       emit(GetCollectionPostsErrorState(
-        error:
-            apiResult.error?.message ?? IsrTranslationFile.somethingWentWrong,
+        error: readableCollectionApiError(apiResult.error?.message),
       ));
     }
   }
@@ -471,8 +483,7 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       }
     } else {
       emit(DeleteCollectionErrorState(
-        error:
-            apiResult.error?.message ?? IsrTranslationFile.somethingWentWrong,
+        error: readableCollectionApiError(apiResult.error?.message),
       ));
     }
   }
@@ -494,9 +505,28 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       emit(RemovePostFromCollectionSuccessState(postId: event.postId));
     } else {
       emit(RemovePostFromCollectionErrorState(
-        error:
-            apiResult.error?.message ?? IsrTranslationFile.somethingWentWrong,
+        error: readableCollectionApiError(apiResult.error?.message),
       ));
     }
   }
+}
+
+/// Turns API error payloads into text a user can read.
+///
+/// The social API often returns a key such as
+/// `posts.errors.saved_post_not_found` instead of a sentence.
+String readableCollectionApiError(String? raw) {
+  final message = (raw ?? '').trim();
+  if (message.isEmpty) return IsrTranslationFile.somethingWentWrong;
+
+  final translated = isrTr(message);
+  if (translated != message) return translated;
+
+  final looksLikeKey =
+      RegExp(r'^[a-z0-9_.]+$').hasMatch(message) && message.contains('.');
+  if (!looksLikeKey) return message;
+
+  final leaf = message.split('.').last.replaceAll('_', ' ').trim();
+  if (leaf.isEmpty) return IsrTranslationFile.somethingWentWrong;
+  return '${leaf[0].toUpperCase()}${leaf.substring(1)}';
 }

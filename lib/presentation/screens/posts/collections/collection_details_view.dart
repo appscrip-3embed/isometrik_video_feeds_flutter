@@ -130,6 +130,8 @@ class _CollectionDetailsViewState extends State<CollectionDetailsView> {
     } else if (state is RemovePostFromCollectionErrorState) {
       Utility.closeProgressDialog();
       Utility.showToastMessage(state.error);
+    } else if (state is MoveToCollectionErrorState) {
+      Utility.showToastMessage(state.error);
     }
   }
 
