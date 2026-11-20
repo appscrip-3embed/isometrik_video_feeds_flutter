@@ -41,6 +41,9 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
   Animation<double>? _routeTransitionAnimation;
   AnimationStatusListener? _routeTransitionListener;
 
+  /// Pixel size of one grid cell; updated in [_buildScrollableMediaGrid].
+  pm.ThumbnailSize _gridThumbnailSize = const pm.ThumbnailSize(300, 534);
+
   @override
   void initState() {
     super.initState();
@@ -251,6 +254,15 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
   }
 
   Widget _buildOptimizedMediaContent(MediaAssetData mediaData) {
+    final assetId = mediaData.assetId;
+    if (assetId != null && _bloc.isGalleryAsset(assetId)) {
+      return GalleryThumbnailWidget(
+        assetId: assetId,
+        size: _gridThumbnailSize,
+        cachedThumbnail: _bloc.cachedGridThumbnail,
+        loadThumbnail: _bloc.getGridThumbnail,
+      );
+    }
     if (mediaData.mediaType == SelectedMediaType.video) {
       // Use cached thumbnail if available
       if (mediaData.thumbnailPath?.isNotEmpty == true) {
@@ -280,11 +292,14 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
         },
       );
 
-  Widget _buildCachedImage(String imagePath) => AppImage.file(
-        imagePath,
+  Widget _buildCachedImage(String imagePath) => Image.file(
+        File(imagePath),
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
+        cacheWidth: _gridThumbnailSize.width,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
       );
 
   void _onAlbumSelected(pm.AssetPathEntity album) {
@@ -474,6 +489,17 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
               left: 0,
               right: 0,
               child: _buildSelectedMediaBottomSheet(state),
+            ),
+          if (state.isPreparingSelection)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black26,
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: widget.mediaSelectionConfig.primaryColor,
+                  ),
+                ),
+              ),
             ),
         ],
       );
@@ -669,8 +695,17 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
     // Use 9:16 aspect ratio as default (9/16 = 0.5625)
     final itemAspectRatio = widget.mediaSelectionConfig.gridItemAspectRatio;
 
+    final columns = crossAxisCount > 2 ? crossAxisCount : 2;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context).clamp(1.0, 2.5);
+    final cellWidthPx = (screenSize.width / columns * pixelRatio).round();
+    _gridThumbnailSize = pm.ThumbnailSize(
+      cellWidthPx,
+      (cellWidthPx / itemAspectRatio).round(),
+    );
+
     return GridView.builder(
       controller: _scrollController,
+      cacheExtent: screenSize.height,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: (crossAxisCount > 2) ? crossAxisCount : 2,
         crossAxisSpacing: 2,
