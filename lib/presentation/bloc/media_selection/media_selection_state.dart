@@ -27,6 +27,7 @@ class MediaSelectionLoadedState extends MediaSelectionState {
     required this.isMultiSelectMode,
     this.isLoadingMore = false,
     this.hasMore = true,
+    this.isPreparingSelection = false,
   });
 
   final List<MediaAssetData> media;
@@ -36,6 +37,9 @@ class MediaSelectionLoadedState extends MediaSelectionState {
   final bool isMultiSelectMode;
   final bool isLoadingMore;
   final bool hasMore;
+
+  /// Selected gallery files are being fetched before completing.
+  final bool isPreparingSelection;
 }
 
 class MediaSelectionErrorState extends MediaSelectionState {
