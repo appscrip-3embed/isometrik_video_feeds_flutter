@@ -123,10 +123,14 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
   void _onScroll() {
     if (!_scrollController.hasClients) return;
 
+    // Stacked create-post leaves this route on [MediaSelectionCompletedState]
+    // after Next; [LoadMoreMediaEvent] still runs and [LoadMediaEvent] re-emits
+    // [MediaSelectionLoadedState] (same as social_v2_tfm / TFM).
     final state = _bloc.state;
-    if (state is! MediaSelectionLoadedState) return;
-    if (state.isLoadingMore || !state.hasMore || state.isResolvingSelection) {
-      return;
+    if (state is MediaSelectionLoadedState) {
+      if (state.isLoadingMore || !state.hasMore || state.isResolvingSelection) {
+        return;
+      }
     }
 
     if (_scrollController.position.pixels >=
