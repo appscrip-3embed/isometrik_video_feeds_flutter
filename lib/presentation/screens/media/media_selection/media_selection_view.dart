@@ -37,10 +37,12 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late final MediaSelectionBloc _bloc;
   late ScrollController _scrollController;
-  int _thumbnailSize = 300;
 
   Animation<double>? _routeTransitionAnimation;
   AnimationStatusListener? _routeTransitionListener;
+
+  /// Pixel size of one grid cell; updated in [_buildScrollableMediaGrid].
+  pm.ThumbnailSize _gridThumbnailSize = const pm.ThumbnailSize(300, 534);
 
   @override
   void initState() {
@@ -121,20 +123,8 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
   }
 
   void _onScroll() {
-    if (!_scrollController.hasClients) return;
-
-    // Stacked create-post leaves this route on [MediaSelectionCompletedState]
-    // after Next; [LoadMoreMediaEvent] still runs and [LoadMediaEvent] re-emits
-    // [MediaSelectionLoadedState] (same as social_v2_tfm / TFM).
-    final state = _bloc.state;
-    if (state is MediaSelectionLoadedState) {
-      if (state.isLoadingMore || !state.hasMore || state.isResolvingSelection) {
-        return;
-      }
-    }
-
     if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 300) {
+        _scrollController.position.maxScrollExtent - 200) {
       _bloc.add(LoadMoreMediaEvent());
     }
   }
@@ -144,9 +134,9 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: widget.mediaSelectionConfig.backgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -156,8 +146,7 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
               height: 4,
               margin: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: widget.mediaSelectionConfig.primaryTextColor
-                    .withValues(alpha: 0.25),
+                color: Colors.grey[300],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -264,13 +253,53 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
     return 0; // Images don't have duration
   }
 
-  Widget _buildOptimizedMediaContent(MediaAssetData mediaData) =>
-      AssetThumbnailWidget(
-        key: ValueKey('thumb_${mediaData.assetId}'),
-        mediaData: mediaData,
-        loadThumbnail: _bloc.getAssetThumbnail,
-        thumbnailSize: _thumbnailSize,
-        loadingColor: widget.mediaSelectionConfig.primaryColor,
+  Widget _buildOptimizedMediaContent(MediaAssetData mediaData) {
+    final assetId = mediaData.assetId;
+    if (assetId != null && _bloc.isGalleryAsset(assetId)) {
+      return GalleryThumbnailWidget(
+        assetId: assetId,
+        size: _gridThumbnailSize,
+        cachedThumbnail: _bloc.cachedGridThumbnail,
+        loadThumbnail: _bloc.getGridThumbnail,
+      );
+    }
+    if (mediaData.mediaType == SelectedMediaType.video) {
+      // Use cached thumbnail if available
+      if (mediaData.thumbnailPath?.isNotEmpty == true) {
+        return _buildCachedImage(mediaData.thumbnailPath!);
+      }
+
+      // Generate thumbnail with throttling
+      return _buildThumbnailWithThrottling(mediaData);
+    } else {
+      // For images, use direct file loading with error handling
+      return _buildCachedImage(mediaData.localPath ?? '');
+    }
+  }
+
+  Widget _buildThumbnailWithThrottling(MediaAssetData mediaData) =>
+      FutureBuilder<String?>(
+        future: _bloc.getVideoThumbnail(mediaData.localPath ?? ''),
+        builder: (context, snapshot) {
+          if (snapshot.hasData && snapshot.data != null) {
+            mediaData.thumbnailPath = snapshot.data;
+            return _buildCachedImage(snapshot.data!);
+          }
+          return Center(
+            child: CircularProgressIndicator(
+                color: widget.mediaSelectionConfig.primaryColor),
+          );
+        },
+      );
+
+  Widget _buildCachedImage(String imagePath) => Image.file(
+        File(imagePath),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        cacheWidth: _gridThumbnailSize.width,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
       );
 
   void _onAlbumSelected(pm.AssetPathEntity album) {
@@ -331,14 +360,13 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
               _getAlbumDisplayIcon(album),
               width: 24.responsiveDimension,
               height: 24.responsiveDimension,
-              color: widget.mediaSelectionConfig.primaryTextColor,
             ),
             10.horizontalSpace,
             Expanded(
               child: Text(
                 displayName,
                 style: TextStyle(
-                  color: widget.mediaSelectionConfig.primaryTextColor,
+                  color: Colors.black,
                   fontSize: 14.responsiveDimension,
                   fontFamily: widget.mediaSelectionConfig.primaryFontFamily,
                   fontWeight: FontWeight.w600,
@@ -357,7 +385,7 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
     );
   }
 
-  SystemUiOverlayStyle get _systemUiOverlay => IsrSystemUi.overlay(
+  SystemUiOverlayStyle get _systemUiOverlay => IsrSystemUi.lightBarsOverlay(
         background: widget.mediaSelectionConfig.appBarColor,
       );
 
@@ -462,10 +490,10 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
               right: 0,
               child: _buildSelectedMediaBottomSheet(state),
             ),
-          if (state.isResolvingSelection)
+          if (state.isPreparingSelection)
             Positioned.fill(
               child: ColoredBox(
-                color: Colors.black.withValues(alpha: 0.2),
+                color: Colors.black26,
                 child: Center(
                   child: CircularProgressIndicator(
                     color: widget.mediaSelectionConfig.primaryColor,
@@ -480,7 +508,7 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
       Container(
         height: 100.responsiveDimension,
         decoration: BoxDecoration(
-          color: widget.mediaSelectionConfig.appBarColor.withValues(alpha: 0.95),
+          color: Colors.white.withValues(alpha: 0.6),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -585,14 +613,14 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
           // Album selector and controls
           Container(
             height: 50.responsiveDimension,
-            color: widget.mediaSelectionConfig.appBarColor,
+            color: Colors.white,
             child: Row(
               children: [
                 Expanded(
                   child: PopupMenuButton<pm.AssetPathEntity>(
                     onSelected: _onAlbumSelected,
                     position: PopupMenuPosition.under,
-                    color: widget.mediaSelectionConfig.backgroundColor,
+                    color: Colors.white,
                     itemBuilder: (context) => state.albums
                         .map((album) =>
                             _buildAlbumMenuItem(album, state.currentAlbum))
@@ -618,10 +646,8 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Icon(
-                            Icons.keyboard_arrow_down,
-                            color: widget.mediaSelectionConfig.primaryTextColor,
-                          ),
+                          const Icon(Icons.keyboard_arrow_down,
+                              color: Colors.black),
                         ],
                       ),
                     ),
@@ -631,7 +657,6 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
                 if (widget.mediaSelectionConfig.isMultiSelect) ...[
                   // Select mode toggle
                   IconButton(
-                    iconSize: 32,
                     icon: state.isMultiSelectMode
                         ? widget.mediaSelectionConfig.multiSelectModeIcon
                         : widget.mediaSelectionConfig.singleSelectModeIcon,
@@ -660,29 +685,29 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
 
     // Calculate aspect ratio for reels-like layout
     final screenSize = MediaQuery.of(context).size;
-    final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
 
     // For reels-like layout, we want items to be taller than wide
     // Calculate crossAxisCount based on screen width and desired item width
     final desiredItemWidth = widget.mediaSelectionConfig.gridItemMaxWidth;
     final crossAxisCount =
         (screenSize.width / desiredItemWidth).floor().clamp(2, 6);
-    final effectiveCrossAxisCount = crossAxisCount > 2 ? crossAxisCount : 2;
-
-    _thumbnailSize = ((screenSize.width / effectiveCrossAxisCount) *
-            devicePixelRatio)
-        .ceil()
-        .clamp(180, 420);
 
     // Use 9:16 aspect ratio as default (9/16 = 0.5625)
     final itemAspectRatio = widget.mediaSelectionConfig.gridItemAspectRatio;
 
+    final columns = crossAxisCount > 2 ? crossAxisCount : 2;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context).clamp(1.0, 2.5);
+    final cellWidthPx = (screenSize.width / columns * pixelRatio).round();
+    _gridThumbnailSize = pm.ThumbnailSize(
+      cellWidthPx,
+      (cellWidthPx / itemAspectRatio).round(),
+    );
+
     return GridView.builder(
       controller: _scrollController,
-      addAutomaticKeepAlives: false,
-      addRepaintBoundaries: true,
+      cacheExtent: screenSize.height,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: effectiveCrossAxisCount,
+        crossAxisCount: (crossAxisCount > 2) ? crossAxisCount : 2,
         crossAxisSpacing: 2,
         mainAxisSpacing: 2,
         childAspectRatio: itemAspectRatio,
@@ -701,10 +726,8 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
 
         // Show loading indicator at the end when loading more
         if (galleryIndex == state.media.length && state.isLoadingMore) {
-          return Center(
-            child: CircularProgressIndicator(
-              color: widget.mediaSelectionConfig.primaryColor,
-            ),
+          return const Center(
+            child: CircularProgressIndicator(color: Colors.black),
           );
         }
 
@@ -717,10 +740,7 @@ class _MediaSelectionViewState extends State<MediaSelectionView>
         final isSelected = state.selectedMedia.contains(mediaData);
         final selectedIndex = state.selectedMedia.indexOf(mediaData);
 
-        return RepaintBoundary(
-          key: ValueKey('media_${mediaData.assetId}'),
-          child: _buildMediaItem(mediaData, isSelected, selectedIndex, state),
-        );
+        return _buildMediaItem(mediaData, isSelected, selectedIndex, state);
       },
     );
   }

@@ -26,8 +26,8 @@ class MediaSelectionLoadedState extends MediaSelectionState {
     required this.selectedMedia,
     required this.isMultiSelectMode,
     this.isLoadingMore = false,
-    this.isResolvingSelection = false,
     this.hasMore = true,
+    this.isPreparingSelection = false,
   });
 
   final List<MediaAssetData> media;
@@ -36,30 +36,10 @@ class MediaSelectionLoadedState extends MediaSelectionState {
   final List<MediaAssetData> selectedMedia;
   final bool isMultiSelectMode;
   final bool isLoadingMore;
-  final bool isResolvingSelection;
   final bool hasMore;
 
-  MediaSelectionLoadedState copyWith({
-    List<MediaAssetData>? media,
-    List<pm.AssetPathEntity>? albums,
-    pm.AssetPathEntity? currentAlbum,
-    List<MediaAssetData>? selectedMedia,
-    bool? isMultiSelectMode,
-    bool? isLoadingMore,
-    bool? isResolvingSelection,
-    bool? hasMore,
-  }) =>
-      MediaSelectionLoadedState(
-        media: media ?? this.media,
-        albums: albums ?? this.albums,
-        currentAlbum: currentAlbum ?? this.currentAlbum,
-        selectedMedia: selectedMedia ?? this.selectedMedia,
-        isMultiSelectMode: isMultiSelectMode ?? this.isMultiSelectMode,
-        isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-        isResolvingSelection:
-            isResolvingSelection ?? this.isResolvingSelection,
-        hasMore: hasMore ?? this.hasMore,
-      );
+  /// Selected gallery files are being fetched before completing.
+  final bool isPreparingSelection;
 }
 
 class MediaSelectionErrorState extends MediaSelectionState {

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:developer';
 import 'dart:io';
 import 'dart:typed_data';
@@ -45,8 +46,22 @@ class MediaSelectionBloc
   int _currentPage = 0;
   bool _isProcessingSelection = false;
   bool _hasMore = true;
+  bool _isLoadingPage = false;
+  bool _isPreparingSelection = false;
 
-  // Thumbnail cache
+  /// Bumped on every fresh (non load-more) load so stale page results are dropped.
+  int _loadGeneration = 0;
+
+  /// Gallery assets backing [_media], keyed by [MediaAssetData.assetId].
+  final Map<String, pm.AssetEntity> _assetsById = {};
+
+  // Grid thumbnails kept in memory (LRU, bounded by total bytes).
+  static const int _maxGridThumbnailBytes = 40 * 1024 * 1024;
+  final LinkedHashMap<String, Uint8List> _gridThumbnailCache = LinkedHashMap();
+  final Map<String, Future<Uint8List?>> _gridThumbnailInFlight = {};
+  int _gridThumbnailBytes = 0;
+
+  // Video thumbnail cache for non-gallery media (captured / preselected).
   final Map<String, String> _thumbnailCache = {};
   final Map<String, Uint8List> _assetThumbnailCache = {};
   final Set<String> _thumbnailGenerationInProgress = {};
@@ -197,49 +212,43 @@ class MediaSelectionBloc
     Emitter<MediaSelectionState> emit,
   ) async {
     if (_currentAlbum == null || _config == null) return;
+    if (event.loadMore && (_isLoadingPage || !_hasMore)) return;
+
+    if (!event.loadMore) {
+      _loadGeneration++;
+      _currentPage = 0;
+      _hasMore = true;
+      _media.clear();
+      _assetsById.clear();
+    }
+    final generation = _loadGeneration;
+    final album = _currentAlbum!;
+    _isLoadingPage = true;
 
     try {
-      if (!event.loadMore) {
-        _currentPage = 0;
-        _media.clear();
-        _hasMore = true;
-      }
-
-      if (!_hasMore && event.loadMore) {
-        return;
-      }
-
       // For load-more, emit immediately so UI shows loading in grid.
       // For initial load, stay in LoadingState until we have media (no emit here).
       if (event.loadMore) {
         emit(MediaSelectionLoadedState(
-          media: _media,
+          media: List.from(_media),
           albums: _albums,
           currentAlbum: _currentAlbum,
-          selectedMedia: _selectedMedia,
+          selectedMedia: List.from(_selectedMedia),
           isMultiSelectMode: _isMultiSelectMode,
           isLoadingMore: true,
           hasMore: _hasMore,
         ));
       }
       log('load local media -> current page: $_currentPage');
-      final assets = await _loadAllowedAssets();
-      log('load local media -> allowed assets ${assets.length}');
+      final page = await _loadAllowedAssets(album, _currentPage);
+      if (generation != _loadGeneration) return;
+      log('load local media -> allowed assets ${page.assets.length}');
 
-      // Convert assets to MediaAssetData
-      final mediaDataList =
-          await Future.wait(assets.map(_convertAssetToMediaAssetData));
-
-      final newMedia = mediaDataList
-          .where((media) => media != null)
-          .cast<MediaAssetData>()
-          .toList();
-
-      if (event.loadMore) {
-        _media.addAll(newMedia);
-      } else {
-        _media.clear();
-        _media.addAll(newMedia);
+      _currentPage = page.nextPage;
+      _hasMore = page.hasMore;
+      for (final asset in page.assets) {
+        _assetsById[asset.id] = asset;
+        _media.add(_convertAssetToMediaAssetData(asset));
       }
 
       emit(MediaSelectionLoadedState(
@@ -252,8 +261,11 @@ class MediaSelectionBloc
         hasMore: _hasMore,
       ));
     } catch (e) {
+      if (generation != _loadGeneration) return;
       debugPrint('Error loading media: $e');
       emit(MediaSelectionErrorState(message: 'Error loading media: $e'));
+    } finally {
+      if (generation == _loadGeneration) _isLoadingPage = false;
     }
   }
 
@@ -261,11 +273,7 @@ class MediaSelectionBloc
     LoadMoreMediaEvent event,
     Emitter<MediaSelectionState> emit,
   ) async {
-    if (state is MediaSelectionLoadedState &&
-        (state as MediaSelectionLoadedState).isLoadingMore) {
-      return;
-    }
-    // _loadAllowedAssets advances _currentPage for each native page it reads.
+    if (_isLoadingPage || !_hasMore) return;
     add(LoadMediaEvent(loadMore: true));
   }
 
@@ -286,7 +294,7 @@ class MediaSelectionBloc
     if (_config == null) return;
 
     // Prevent rapid successive selections
-    if (_isProcessingSelection) {
+    if (_isProcessingSelection || _isPreparingSelection) {
       return;
     }
 
@@ -492,8 +500,70 @@ class MediaSelectionBloc
           message: 'Please select at least one media item'));
       return;
     }
+    if (_isPreparingSelection) return;
 
-    emit(MediaSelectionCompletedState(selectedMedia: mediaToEdit));
+    final needsResolve = mediaToEdit.any(
+        (media) => media.localPath == null && _assetsById[media.assetId] != null);
+    if (!needsResolve) {
+      emit(MediaSelectionCompletedState(selectedMedia: mediaToEdit));
+      return;
+    }
+
+    _isPreparingSelection = true;
+    emit(_loadedState());
+    try {
+      final resolved = await Future.wait(mediaToEdit.map(_resolveSelectedMedia));
+      final failed = resolved.where((media) => media.localPath == null).toList();
+      if (failed.isNotEmpty) {
+        _selectedMedia.removeWhere(failed.contains);
+        _isPreparingSelection = false;
+        emit(MediaSelectionErrorState(
+            message: 'Unable to load the selected media. Please try again.'));
+        emit(_loadedState());
+        return;
+      }
+      _isPreparingSelection = false;
+      emit(MediaSelectionCompletedState(selectedMedia: resolved));
+      // CompletedState is not built. Restore the grid so the spinner does not
+      // stay up while the editor is open and after the user comes back.
+      emit(_loadedState());
+    } finally {
+      _isPreparingSelection = false;
+    }
+  }
+
+  MediaSelectionLoadedState _loadedState() => MediaSelectionLoadedState(
+        media: List.from(_media),
+        albums: _albums,
+        currentAlbum: _currentAlbum,
+        selectedMedia: List.from(_selectedMedia),
+        isMultiSelectMode: _isMultiSelectMode,
+        hasMore: _hasMore,
+        isPreparingSelection: _isPreparingSelection,
+      );
+
+  /// Fills [MediaAssetData.localPath], [MediaAssetData.file] and
+  /// [MediaAssetData.thumbnailPath] for a gallery item. Done only on selection
+  /// because [pm.AssetEntity.file] may copy or download (iCloud) the original.
+  Future<MediaAssetData> _resolveSelectedMedia(MediaAssetData media) async {
+    final asset = _assetsById[media.assetId];
+    if (media.localPath != null || asset == null) return media;
+    try {
+      final results = await Future.wait<Object?>([
+        asset.file,
+        getThumbnailFile(asset),
+      ]);
+      final file = results[0] as File?;
+      if (file == null) return media;
+      media
+        ..file = file
+        ..localPath = file.path
+        ..extension = file.path.split('.').last
+        ..thumbnailPath ??= (results[1] as File?)?.path;
+    } catch (e) {
+      debugPrint('MediaSelectionBloc: resolve media ${media.assetId} error: $e');
+    }
+    return media;
   }
 
   /// Newest first. Video duration is applied by the photo library.
@@ -514,29 +584,26 @@ class MediaSelectionBloc
     );
   }
 
-  /// Fills one grid page, skipping videos over [MediaSelectionConfig.videoMaxSizeBytes].
+  /// Fills one grid page from [album] starting at native page [startPage],
+  /// skipping videos over [MediaSelectionConfig.videoMaxSizeBytes].
   ///
   /// A reported size of `0` is treated as unknown and kept.
-  /// [_currentPage] advances past every native page consumed.
-  Future<List<pm.AssetEntity>> _loadAllowedAssets() async {
+  Future<({List<pm.AssetEntity> assets, int nextPage, bool hasMore})>
+      _loadAllowedAssets(pm.AssetPathEntity album, int startPage) async {
     final pageSize = _config!.pageSize;
     final accepted = <pm.AssetEntity>[];
-    while (accepted.length < pageSize && _hasMore) {
-      final assets = await _currentAlbum!.getAssetListPaged(
-        page: _currentPage,
-        size: pageSize,
-      );
-      _currentPage++;
-      if (assets.isEmpty || assets.length < pageSize) {
-        _hasMore = false;
-      }
-      for (final asset in assets) {
-        if (await _isWithinVideoSizeLimit(asset)) {
-          accepted.add(asset);
-        }
+    var page = startPage;
+    var hasMore = true;
+    while (accepted.length < pageSize && hasMore) {
+      final assets = await album.getAssetListPaged(page: page, size: pageSize);
+      page++;
+      if (assets.length < pageSize) hasMore = false;
+      final allowed = await Future.wait(assets.map(_isWithinVideoSizeLimit));
+      for (var i = 0; i < assets.length; i++) {
+        if (allowed[i]) accepted.add(assets[i]);
       }
     }
-    return accepted;
+    return (assets: accepted, nextPage: page, hasMore: hasMore);
   }
 
   Future<bool> _isWithinVideoSizeLimit(pm.AssetEntity asset) async {
@@ -552,29 +619,55 @@ class MediaSelectionBloc
     }
   }
 
-  Future<MediaAssetData?> _convertAssetToMediaAssetData(
-      pm.AssetEntity asset) async {
-    try {
-      final file = await asset.file;
-      final thumbnailFileData = await getThumbnailFile(asset);
-      if (file == null) return null;
-
-      final isVideo = asset.type == pm.AssetType.video;
-
-      return MediaAssetData(
+  /// File-backed fields are filled lazily by [_resolveSelectedMedia].
+  MediaAssetData _convertAssetToMediaAssetData(pm.AssetEntity asset) =>
+      MediaAssetData(
         assetId: asset.id,
-        localPath: file.path,
-        file: file,
-        mediaType: isVideo ? SelectedMediaType.video : SelectedMediaType.image,
+        mediaType: asset.type == pm.AssetType.video
+            ? SelectedMediaType.video
+            : SelectedMediaType.image,
         width: asset.width,
-        thumbnailPath: thumbnailFileData?.path,
         height: asset.height,
         duration: asset.duration,
-        extension: file.path.split('.').last,
       );
-    } catch (e) {
-      debugPrint('Error converting asset to MediaAssetData: $e');
-      return null;
+
+  bool isGalleryAsset(String? assetId) => _assetsById.containsKey(assetId);
+
+  Uint8List? cachedGridThumbnail(String assetId) {
+    final bytes = _gridThumbnailCache.remove(assetId);
+    if (bytes != null) _gridThumbnailCache[assetId] = bytes;
+    return bytes;
+  }
+
+  /// In-memory grid thumbnail for a gallery asset, deduplicated per asset.
+  Future<Uint8List?> getGridThumbnail(String assetId, pm.ThumbnailSize size) {
+    final cached = cachedGridThumbnail(assetId);
+    if (cached != null) return Future.value(cached);
+    final asset = _assetsById[assetId];
+    if (asset == null) return Future.value();
+    return _gridThumbnailInFlight[assetId] ??= () async {
+      try {
+        final bytes = await asset.thumbnailDataWithSize(size, quality: 80);
+        if (bytes != null && !isClosed) _putGridThumbnail(assetId, bytes);
+        return bytes;
+      } catch (e) {
+        debugPrint('MediaSelectionBloc: grid thumbnail $assetId error: $e');
+        return null;
+      } finally {
+        _gridThumbnailInFlight.remove(assetId)?.ignore();
+      }
+    }();
+  }
+
+  void _putGridThumbnail(String assetId, Uint8List bytes) {
+    final previous = _gridThumbnailCache.remove(assetId);
+    if (previous != null) _gridThumbnailBytes -= previous.lengthInBytes;
+    _gridThumbnailCache[assetId] = bytes;
+    _gridThumbnailBytes += bytes.lengthInBytes;
+    while (_gridThumbnailBytes > _maxGridThumbnailBytes &&
+        _gridThumbnailCache.length > 1) {
+      final oldestKey = _gridThumbnailCache.keys.first;
+      _gridThumbnailBytes -= _gridThumbnailCache.remove(oldestKey)!.lengthInBytes;
     }
   }
 
@@ -736,5 +829,8 @@ class MediaSelectionBloc
     }
     _thumbnailCache.clear();
     _thumbnailGenerationInProgress.clear();
+    _gridThumbnailCache.clear();
+    _gridThumbnailInFlight.clear();
+    _gridThumbnailBytes = 0;
   }
 }
