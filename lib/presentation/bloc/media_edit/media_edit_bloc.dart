@@ -269,27 +269,42 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     if (sound != null && sound.soundUrl?.isNotEmpty == true) {
       final item = _mediaEditItems[_currentIndex];
       if (!useCarouselOverlay && item.mediaType == EditMediaType.video) {
-        emit(MediaEditLoadedState(
-          mediaEditItems: List.from(_mediaEditItems),
-          currentIndex: _currentIndex,
-          isApplyingSound: true,
-        ));
+        final trackStartMs =
+            PostSoundUtil.soundTrackStartOffsetMilliseconds(sound);
+        // Non-zero start: preview uses muted video + synced overlay; mux at export.
+        if (trackStartMs > 0) {
+          // Drop a prior mux so preview uses the library URL + start_time.
+          final editPath = item.editedPath?.trim() ?? '';
+          final original = item.originalPath.trim();
+          final clearedEdit =
+              editPath.isNotEmpty && editPath != original ? original : null;
+          _mediaEditItems[_currentIndex] = item.copyWith(
+            sound: sound,
+            editedPath: clearedEdit ?? item.editedPath,
+          );
+        } else {
+          emit(MediaEditLoadedState(
+            mediaEditItems: List.from(_mediaEditItems),
+            currentIndex: _currentIndex,
+            isApplyingSound: true,
+          ));
 
-        final videoPath = item.editedPath ?? item.originalPath;
-        final muxed = await PostSoundUtil.muxVideoWithSound(
-          videoPath: videoPath,
-          sound: sound,
-          showLoader: false,
-        );
-        if (muxed == videoPath) {
-          Utility.showToastMessage(
-            'Could not mix audio into this video. Try another sound or clip.',
+          final videoPath = item.editedPath ?? item.originalPath;
+          final muxed = await PostSoundUtil.muxVideoWithSound(
+            videoPath: videoPath,
+            sound: sound,
+            showLoader: false,
+          );
+          if (muxed == videoPath) {
+            Utility.showToastMessage(
+              'Could not mix audio into this video. Try another sound or clip.',
+            );
+          }
+          _mediaEditItems[_currentIndex] = item.copyWith(
+            editedPath: muxed,
+            sound: sound,
           );
         }
-        _mediaEditItems[_currentIndex] = item.copyWith(
-          editedPath: muxed,
-          sound: sound,
-        );
       } else {
         for (var i = 0; i < _mediaEditItems.length; i++) {
           _mediaEditItems[i] = _mediaEditItems[i].copyWith(sound: sound);
@@ -419,6 +434,26 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     ProceedToNextEvent event,
     Emitter<MediaEditState> emit,
   ) async {
+    final useCarousel =
+        PostSoundUtil.useCarouselPostSoundOverlayForEditItems(_mediaEditItems);
+    if (!useCarousel) {
+      for (var i = 0; i < _mediaEditItems.length; i++) {
+        final item = _mediaEditItems[i];
+        final sound = item.sound;
+        if (item.mediaType != EditMediaType.video ||
+            sound == null ||
+            sound.soundUrl?.trim().isEmpty == true) {
+          continue;
+        }
+        final path = item.editedPath ?? item.originalPath;
+        final muxed = await PostSoundUtil.muxVideoWithSound(
+          videoPath: path,
+          sound: sound,
+          showLoader: false,
+        );
+        _mediaEditItems[i] = item.copyWith(editedPath: muxed);
+      }
+    }
     emit(MediaEditCompletedState(mediaEditItems: List.from(_mediaEditItems)));
   }
 

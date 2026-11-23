@@ -74,6 +74,7 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
   String? _selectedMusicThumbnailUrl;
   int? _selectedMusicDurationSeconds;
   String? _selectedMusicPreviewUrl;
+  double _selectedMusicStartOffsetSec = 0;
 
   AudioPlayer? _framingMusicPlayer;
   String? _framingMusicLoadedUrl;
@@ -116,6 +117,11 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
   String? get selectedMusicThumbnailUrl => _selectedMusicThumbnailUrl;
   int? get selectedMusicDurationSeconds => _selectedMusicDurationSeconds;
   String? get selectedMusicPreviewUrl => _selectedMusicPreviewUrl;
+  double get selectedMusicStartOffsetSec => _selectedMusicStartOffsetSec;
+
+  /// Whole-second view (legacy); prefer [selectedMusicStartOffsetSec].
+  int get selectedMusicStartTimeSeconds =>
+      _selectedMusicStartOffsetSec.round();
   bool get hasMusicSelected =>
       _selectedMusicId != null && _selectedMusicId!.isNotEmpty;
   bool get isSegmentRecording => _isSegmentRecording;
@@ -205,14 +211,26 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
       final p = _framingMusicPlayer!;
       await p.setReleaseMode(ReleaseMode.loop);
 
+      final startSec = _selectedMusicStartOffsetSec.clamp(0.0, 86400.0);
       if (_framingMusicLoadedUrl != url) {
         await p.stop();
         _framingMusicLoadedUrl = url;
-        await p.play(audioSourceFromUrlOrPath(url));
+        await p.setSource(audioSourceFromUrlOrPath(url));
+        if (startSec > 0) {
+          await p.seek(
+            Duration(microseconds: (startSec * 1000000).round()),
+          );
+        }
+        await p.resume();
         return;
       }
 
       if (p.state != PlayerState.playing) {
+        if (startSec > 0) {
+          await p.seek(
+            Duration(microseconds: (startSec * 1000000).round()),
+          );
+        }
         await p.resume();
       }
     } catch (e) {
@@ -703,6 +721,8 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
     _selectedMusicThumbnailUrl = event.musicThumbnailUrl;
     _selectedMusicDurationSeconds = event.musicDurationSeconds;
     _selectedMusicPreviewUrl = event.musicPreviewUrl;
+    _selectedMusicStartOffsetSec =
+        event.musicStartTimeSeconds.clamp(0.0, 86400.0);
     if (prevPreview != _selectedMusicPreviewUrl) {
       try {
         await _framingMusicPlayer?.stop();
@@ -857,11 +877,13 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
         final videoIn = finalVideoPath;
         final musicIn = _selectedMusicPreviewUrl!;
         final videoDurationSec = await MediaUtil.videoDurationSeconds(videoIn);
+        final musicStart = _selectedMusicStartOffsetSec.clamp(0.0, 86400.0);
         final muxed = await MediaUtil.muxVideoWithMusicFromUrl(
           videoPath: videoIn,
           musicUrlOrPath: musicIn,
           maxDurationSeconds:
               videoDurationSec > 0 ? videoDurationSec : null,
+          musicStartOffsetSeconds: musicStart,
         );
         if (muxed != null && await File(muxed).exists()) {
           if (muxed != videoIn) {

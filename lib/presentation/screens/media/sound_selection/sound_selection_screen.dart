@@ -107,14 +107,21 @@ class SoundFilterChip extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: 14.responsiveDimension),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(17.responsiveDimension),
-          color: selected ? st.selectionAccent : st.selectionAccent,
+          color: selected ? st.selectionAccent : st.filterChipBackground,
+          border: Border.all(
+            color: selected
+                ? st.selectionAccent
+                : st.chipBorderUnselected.withValues(alpha: 0.45),
+          ),
         ),
         child: Text(
           title,
           style: TextStyle(
-            color: selected ? st.filterChipOnSelected : st.onSurface,
+            color: selected
+                ? st.filterChipOnSelected
+                : st.filterChipOnUnselected,
             fontSize: 13.responsiveDimension,
-            fontWeight: FontWeight.w500,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
       ),
@@ -142,7 +149,6 @@ class SoundCategoryChip extends StatelessWidget {
     final cardWidth = 120.responsiveDimension;
     final cardHeight = 80.responsiveDimension;
     final radius = 12.responsiveDimension;
-    final borderWidth = 2.0;
     return TapHandler(
       onTap: onTap,
       child: Column(
@@ -154,75 +160,81 @@ class SoundCategoryChip extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(radius),
               border: Border.all(
-                color: selected ? st.selectionAccent : st.selectionAccent,
-                width: borderWidth,
+                color: selected
+                    ? st.selectionAccent
+                    : st.chipBorderUnselected.withValues(alpha: 0.5),
+                width: selected ? 2 : 1,
               ),
-              color: st.selectionAccent,
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: st.selectionAccent.withValues(alpha: 0.22),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
             ),
-            child: Padding(
-              // Keep media/overlay inside the stroked rounded border.
-              padding: EdgeInsets.all(borderWidth),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(radius - borderWidth),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (thumbnailUrl == null)
-                      Container(
-                        color: st.chipSurface,
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.grid_view_rounded,
-                          color: st.onSurfaceSecondary,
-                          size: 22.responsiveDimension,
-                        ),
-                      )
-                    else
-                      AppImage.network(
-                        thumbnailUrl!,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius - 1),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (thumbnailUrl == null)
+                    Container(
+                      color: st.filterChipBackground,
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.grid_view_rounded,
+                        color: st.selectionAccent.withValues(alpha: 0.65),
+                        size: 22.responsiveDimension,
                       ),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.04),
-                            Colors.black.withValues(alpha: 0.62),
-                          ],
-                        ),
+                    )
+                  else
+                    AppImage.network(
+                      thumbnailUrl!,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.04),
+                          Colors.black.withValues(alpha: 0.62),
+                        ],
                       ),
                     ),
-                    Positioned(
-                      left: 5.responsiveDimension,
-                      right: 5.responsiveDimension,
-                      bottom: 4.responsiveDimension,
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.left,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9.5.responsiveDimension,
-                          fontWeight: FontWeight.w600,
-                          height: 1.1,
-                          shadows: const [
-                            Shadow(
-                              color: Color(0x99000000),
-                              blurRadius: 3,
-                              offset: Offset(0, 1),
-                            ),
-                          ],
-                        ),
+                  ),
+                  Positioned(
+                    left: 5.responsiveDimension,
+                    right: 5.responsiveDimension,
+                    bottom: 4.responsiveDimension,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.left,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5.responsiveDimension,
+                        fontWeight: FontWeight.w600,
+                        height: 1.1,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x99000000),
+                            blurRadius: 3,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

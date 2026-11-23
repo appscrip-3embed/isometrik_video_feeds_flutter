@@ -8,25 +8,34 @@ class SoundLibraryUseCase extends BaseUseCase {
   final SoundsRepository _repository;
   final IsmLocalDataUseCase _localDataUseCase;
 
+  /// Default list page size for sound picker tabs (keep in sync with UI).
+  static const int defaultPageSize = 20;
+
   Future<ApiResult<SoundLibrarySections>> loadSections({
     required bool isLoading,
     String fallbackPreviewUrl = '',
   }) async =>
       execute(() async {
-        final recentR =
-            await _repository.listRecentSounds(isLoading: isLoading, limit: 10);
+        const pageSize = defaultPageSize;
+        final recentR = await _repository.listRecentSounds(
+          isLoading: isLoading,
+          limit: pageSize,
+        );
         final trendingR = await _repository.listTrendingSounds(
           isLoading: isLoading,
           page: 1,
-          pageSize: 10,
+          pageSize: pageSize,
         );
         final recommendedR = await _repository.listRecommendedSounds(
           isLoading: isLoading,
           page: 1,
-          pageSize: 10,
+          pageSize: pageSize,
         );
-        final savedR =
-            await _repository.listSavedSounds(isLoading: isLoading, limit: 20);
+        final savedR = await _repository.listSavedSounds(
+          isLoading: isLoading,
+          skip: 0,
+          limit: pageSize,
+        );
 
         List<SoundTrack> map(CustomResponse<List<SoundData>?> r) =>
             (r.data ?? [])
@@ -49,6 +58,8 @@ class SoundLibraryUseCase extends BaseUseCase {
     required bool isLoading,
     required String query,
     String? categoryIds,
+    int page = 1,
+    int pageSize = defaultPageSize,
     String fallbackPreviewUrl = '',
   }) async =>
       execute(() async {
@@ -56,8 +67,8 @@ class SoundLibraryUseCase extends BaseUseCase {
           isLoading: isLoading,
           search: query,
           categoryIds: categoryIds,
-          page: 1,
-          pageSize: 30,
+          page: page,
+          pageSize: pageSize,
         );
         final tracks = (response.data ?? [])
             .map((s) => s.toSoundTrack(fallbackPreviewUrl: fallbackPreviewUrl))
@@ -69,7 +80,7 @@ class SoundLibraryUseCase extends BaseUseCase {
     required bool isLoading,
     required String section,
     required int page,
-    int pageSize = 20,
+    int pageSize = defaultPageSize,
     String fallbackPreviewUrl = '',
   }) async =>
       execute(() async {
@@ -92,6 +103,7 @@ class SoundLibraryUseCase extends BaseUseCase {
             data = response.data ?? const [];
             break;
           case 'recent':
+            // Recent endpoint uses `limit` as a cumulative cap (no page offset).
             final response = await _repository.listRecentSounds(
               isLoading: isLoading,
               limit: page * pageSize,
@@ -101,7 +113,8 @@ class SoundLibraryUseCase extends BaseUseCase {
           case 'saved':
             final response = await _repository.listSavedSounds(
               isLoading: isLoading,
-              limit: page * pageSize,
+              skip: (page - 1) * pageSize,
+              limit: pageSize,
             );
             data = response.data ?? const [];
             break;

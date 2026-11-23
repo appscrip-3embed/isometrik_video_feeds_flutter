@@ -425,5 +425,15 @@ const Map<String, String> kIsrTrFallback = {
   'couldNotUpdateSavedSound': 'Could not update saved sound',
   'lyrics': 'Lyrics',
   'useThisSound': 'Use this sound',
+  'chooseSoundStart': 'Choose where the sound starts',
+  'dragToSelectSoundStart':
+      'Drag along the waveform to set the starting point for your post.',
+  'startsAt': 'Starts at',
+  'soundStartManualLabel': 'Or enter start time',
+  'soundStartManualHint': '0:26.150 or 26.15',
+  'soundStartManualInvalid': 'Could not read that time. Try 0:26.150',
+  'playingAt': 'Playing',
+  'pausedAt': 'Paused at',
+  'soundSetStartToPlayback': 'Set start to this time',
   'addStory': 'Add Story',
 };

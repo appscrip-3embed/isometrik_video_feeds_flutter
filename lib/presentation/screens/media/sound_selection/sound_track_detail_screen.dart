@@ -6,9 +6,12 @@ import 'package:ism_video_reel_player/di/di.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/domain/models/sound_library_models.dart';
 import 'package:ism_video_reel_player/presentation/presentation.dart';
+import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/sound_selection/sound_selection_theme.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/sound_selection/sound_track_start_picker_screen.dart';
 import 'package:ism_video_reel_player/utils/audio_source_util.dart';
 import 'package:ism_video_reel_player/utils/sound_library_feature_util.dart';
+import 'package:ism_video_reel_player/utils/sound_picker_preview_audio.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 
 /// Full-bleed preview for a single track with preview playback and **Use this sound**.
@@ -303,25 +306,34 @@ class _SoundTrackDetailScreenState extends State<SoundTrackDetailScreen> {
                   ),
                 ),
                 onPressed: () async {
-                  await _player.pause();
+                  await _player.stop();
+                  await SoundPickerPreviewAudio.shutdown();
                   if (widget.pickerOnly) {
-                    if (context.mounted) Navigator.pop(context, true);
+                    final applied =
+                        await SoundTrackStartPickerScreen.pickForCamera(
+                      context,
+                      track: widget.track,
+                      cameraBloc: widget.cameraBloc!,
+                    );
+                    if (context.mounted && applied) {
+                      Navigator.pop(context, true);
+                    }
                     return;
                   }
-                  widget.cameraBloc?.add(
-                    CameraSetMusicEvent(
-                      musicId: widget.track.id,
-                      musicName: widget.track.title,
-                      musicArtist: widget.track.author,
-                      musicThumbnailUrl: widget.track.thumbnailUrl,
-                      musicDurationSeconds: widget.track.duration.inSeconds,
-                      musicPreviewUrl: widget.track.trackUrl,
-                    ),
+                  final cameraBloc = widget.cameraBloc;
+                  if (cameraBloc == null) return;
+                  final applied =
+                      await SoundTrackStartPickerScreen.pickForCamera(
+                    context,
+                    track: widget.track,
+                    cameraBloc: cameraBloc,
                   );
-                  if (context.mounted) Navigator.pop(context, true);
+                  if (context.mounted && applied) {
+                    Navigator.pop(context, true);
+                  }
                 },
                 child: Text(
-                  'Use this sound',
+                  IsrTranslationFile.useThisSound,
                   style: TextStyle(
                     fontSize: 16.responsiveDimension,
                     fontWeight: FontWeight.w700,

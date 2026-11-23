@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/media_edit.dart';
+import 'package:ism_video_reel_player/utils/post_sound_util.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -13,13 +14,13 @@ class VideoPreviewWidget extends StatefulWidget {
     required this.mediaEditItem,
     required this.onRemoveMedia,
     required this.mediaEditConfig,
-    this.postSoundStartOffsetSeconds = 0,
+    this.postSoundStartOffsetMilliseconds = 0,
     this.forcePostLevelSoundOverlay = false,
   });
 
   final MediaEditItem mediaEditItem;
   /// Seek position on the post soundtrack before this video slice (mixed carousel).
-  final int postSoundStartOffsetSeconds;
+  final int postSoundStartOffsetMilliseconds;
   /// When true, play [MediaEditItem.sound] as overlay (mute file audio) even if muxed.
   final bool forcePostLevelSoundOverlay;
   final VoidCallback onRemoveMedia;
@@ -37,6 +38,7 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
   bool _isVideoVisible = true;
   bool _wasPlayingBeforeVisibilityChange = false;
   bool _videoEnded = false;
+  bool _lastVideoPlaying = false;
 
   bool get _hasSelectedSound =>
       widget.mediaEditItem.sound?.soundUrl?.trim().isNotEmpty == true;
@@ -47,9 +49,14 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
     return edited.isNotEmpty && edited != original;
   }
 
+  /// Always overlay the library track in the editor so [start_time] is honored
+  /// (muxed files may still contain audio from 0:00).
   bool get _usesSeparateSoundPreview =>
       _hasSelectedSound &&
-      (!_soundMuxedIntoVideo || widget.forcePostLevelSoundOverlay);
+      (!_soundMuxedIntoVideo ||
+          widget.forcePostLevelSoundOverlay ||
+          widget.postSoundStartOffsetMilliseconds > 0 ||
+          PostSoundUtil.isLibrarySoundId(widget.mediaEditItem.sound?.soundId));
 
   @override
   void initState() {
@@ -61,7 +68,16 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
   void didUpdateWidget(VideoPreviewWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.mediaEditItem != widget.mediaEditItem) {
+    final soundChanged =
+        oldWidget.mediaEditItem.sound?.soundId !=
+            widget.mediaEditItem.sound?.soundId ||
+        oldWidget.mediaEditItem.sound?.soundMetadata?['start_time'] !=
+            widget.mediaEditItem.sound?.soundMetadata?['start_time'];
+    final offsetChanged = oldWidget.postSoundStartOffsetMilliseconds !=
+        widget.postSoundStartOffsetMilliseconds;
+    if (oldWidget.mediaEditItem != widget.mediaEditItem ||
+        soundChanged ||
+        offsetChanged) {
       unawaited(_stopSoundPreview());
       _initializeVideo();
     }
@@ -196,6 +212,10 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
     try {
       await player.setReleaseMode(ReleaseMode.stop);
       await player.setSource(UrlSource(url));
+      final offsetMs = widget.postSoundStartOffsetMilliseconds;
+      if (offsetMs > 0) {
+        await player.seek(Duration(milliseconds: offsetMs));
+      }
     } catch (_) {
       await _stopSoundPreview();
     }
@@ -215,6 +235,12 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
     if (reachedEnd && controller.value.isPlaying) {
       unawaited(_handleVideoReachedEnd());
     }
+
+    final isPlaying = controller.value.isPlaying;
+    if (isPlaying && !_lastVideoPlaying && _usesSeparateSoundPreview) {
+      unawaited(_syncSoundWithVideoPlayback(playing: true));
+    }
+    _lastVideoPlaying = isPlaying;
   }
 
   Future<void> _handleVideoReachedEnd() async {
@@ -250,8 +276,9 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
       _videoEnded = false;
       final maxPosition = duration - const Duration(milliseconds: 50);
       final targetPosition = position > maxPosition ? maxPosition : position;
-      final trackPosition = Duration(seconds: widget.postSoundStartOffsetSeconds) +
-          targetPosition;
+      final trackPosition =
+          Duration(milliseconds: widget.postSoundStartOffsetMilliseconds) +
+              targetPosition;
       await player.seek(trackPosition);
       await player.resume();
 

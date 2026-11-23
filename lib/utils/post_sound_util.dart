@@ -183,9 +183,35 @@ abstract final class PostSoundUtil {
       soundDuration: cameraBloc.selectedMusicDurationSeconds?.toString(),
       soundMetadata: {
         'title': cameraBloc.selectedMusicName,
+        'start_time': cameraBloc.selectedMusicStartOffsetSec
+            .clamp(0.0, 86400.0),
       },
     );
   }
+
+  /// User-selected offset into the full library track (seconds).
+  static int soundTrackStartOffsetSeconds(MediaEditSoundItem? sound) {
+    final ms = soundTrackStartOffsetMilliseconds(sound);
+    return (ms / 1000).round();
+  }
+
+  /// Sub-second start offset for preview / seek.
+  static int soundTrackStartOffsetMilliseconds(MediaEditSoundItem? sound) {
+    if (sound == null) return 0;
+    final fromMeta = _readNum(sound.soundMetadata?['start_time']);
+    if (fromMeta != null && fromMeta > 0) {
+      return (fromMeta * 1000).round();
+    }
+    return 0;
+  }
+
+  /// Track start + carousel slice position (create-post media edit preview).
+  static int postSoundPreviewOffsetMilliseconds({
+    MediaEditSoundItem? sound,
+    int carouselSliceStartSeconds = 0,
+  }) =>
+      soundTrackStartOffsetMilliseconds(sound) +
+      carouselSliceStartSeconds * 1000;
 
   /// Maps the post-detail `sound` field into the sound library [SoundTrack]
   /// used by the camera + sound-picker UI.
@@ -223,7 +249,11 @@ abstract final class PostSoundUtil {
     );
   }
 
-  static MediaEditSoundItem soundItemFromTrack(SoundTrack track) =>
+  static MediaEditSoundItem soundItemFromTrack(
+    SoundTrack track, {
+    double startTimeSeconds = 0,
+    int? segmentDurationSeconds,
+  }) =>
       MediaEditSoundItem(
         soundId: track.id,
         soundUrl: track.trackUrl,
@@ -232,6 +262,9 @@ abstract final class PostSoundUtil {
         soundDuration: track.duration.inSeconds.toString(),
         soundMetadata: {
           'title': track.title,
+          'start_time': startTimeSeconds.clamp(0, 86400).toDouble(),
+          if (segmentDurationSeconds != null)
+            'segment_duration': segmentDurationSeconds,
           if (track.originalStatus != null && track.originalStatus!.isNotEmpty)
             'original_status': track.originalStatus,
         },
@@ -254,8 +287,8 @@ abstract final class PostSoundUtil {
         0;
     final videoSec = videoDurationSeconds ?? 0;
 
-    var startTime = _readInt(meta['start_time']) ?? 0;
-    if (startTime < 0) startTime = 0;
+    var startTime = _readNum(meta['start_time']) ?? 0.0;
+    if (startTime < 0) startTime = 0.0;
 
     var segmentDuration = _readInt(meta['segment_duration']) ??
         (soundSec > 0 ? soundSec : defaultSegmentSec);
@@ -265,11 +298,12 @@ abstract final class PostSoundUtil {
     }
     if (segmentDuration <= 0) segmentDuration = defaultSegmentSec;
 
-    var endTime = _readInt(meta['end_time']) ?? startTime + segmentDuration;
+    var endTime = _readNum(meta['end_time']) ?? startTime + segmentDuration;
     if (endTime <= startTime) endTime = startTime + segmentDuration;
     if (soundSec > 0 && endTime > soundSec) {
-      endTime = soundSec;
-      segmentDuration = (endTime - startTime).clamp(1, segmentDuration);
+      endTime = soundSec.toDouble();
+      final span = endTime - startTime;
+      segmentDuration = span.clamp(1.0, segmentDuration.toDouble()).round();
     }
 
     final snapshot = <String, dynamic>{
@@ -331,6 +365,13 @@ abstract final class PostSoundUtil {
     return null;
   }
 
+  static double? _readNum(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value.trim());
+    return null;
+  }
+
   /// Replaces video audio with the selected sound URL/path.
   static Future<String> muxVideoWithSound({
     required String videoPath,
@@ -343,11 +384,14 @@ abstract final class PostSoundUtil {
     if (showLoader) await Utility.showLoader();
     try {
       final videoDurationSec = await MediaUtil.videoDurationSeconds(videoPath);
+      final musicStart =
+          (_readNum(sound.soundMetadata?['start_time']) ?? 0).clamp(0.0, 86400.0);
       final muxed = await MediaUtil.muxVideoWithMusicFromUrl(
         videoPath: videoPath,
         musicUrlOrPath: musicUrl,
         maxDurationSeconds:
             videoDurationSec > 0 ? videoDurationSec : null,
+        musicStartOffsetSeconds: musicStart,
       );
       if (muxed != null &&
           muxed != videoPath &&

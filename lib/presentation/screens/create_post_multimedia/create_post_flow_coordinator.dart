@@ -394,7 +394,11 @@ abstract final class CreatePostFlowCoordinator {
           final item = mediaEditItems[i];
           if (item.mediaType == me.EditMediaType.video) {
             var editedPath = item.editedPath ?? item.originalPath;
-            if (preselectedSound.soundUrl?.isNotEmpty == true) {
+            final trackStartMs = PostSoundUtil.soundTrackStartOffsetMilliseconds(
+              preselectedSound,
+            );
+            if (preselectedSound.soundUrl?.isNotEmpty == true &&
+                trackStartMs == 0) {
               editedPath = await PostSoundUtil.muxVideoWithSound(
                 videoPath: editedPath,
                 sound: preselectedSound,
@@ -418,7 +422,8 @@ abstract final class CreatePostFlowCoordinator {
         if (media.mediaType == ms.SelectedMediaType.video &&
             media.sound?.soundUrl?.isNotEmpty == true &&
             !media.soundAppliedToVideo &&
-            media.localPath?.isNotEmpty == true) {
+            media.localPath?.isNotEmpty == true &&
+            PostSoundUtil.soundTrackStartOffsetMilliseconds(media.sound!) == 0) {
           final muxed = await PostSoundUtil.muxVideoWithSound(
             videoPath: media.localPath!,
             sound: media.sound!,

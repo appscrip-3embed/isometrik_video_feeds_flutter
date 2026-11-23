@@ -106,8 +106,14 @@ class MediaUtil {
     required String audioPath,
     required String outputPath,
     int? maxDurationSeconds,
+    /// Offset into [audioPath] where muxed playback should begin (reel start time).
+    double musicStartOffsetSeconds = 0,
   }) async {
     final bitrate = await _exportBitrateForVideoPath(videoPath);
+    final clampedStart = musicStartOffsetSeconds.clamp(0.0, 86400.0);
+    final audioStartTime = clampedStart > 0
+        ? Duration(microseconds: (clampedStart * 1000000).round())
+        : null;
     final renderData = VideoRenderData(
       id: 'mux_${const Uuid().v4()}',
       videoSegments: [
@@ -115,7 +121,11 @@ class MediaUtil {
       ],
       enableAudio: false,
       audioTracks: [
-        VideoAudioTrack(path: audioPath, loop: true),
+        VideoAudioTrack(
+          path: audioPath,
+          loop: true,
+          audioStartTime: audioStartTime,
+        ),
       ],
       outputFormat: VideoOutputFormat.mp4,
       bitrate: bitrate,
@@ -145,6 +155,7 @@ class MediaUtil {
     required String videoPath,
     required String musicUrlOrPath,
     int? maxDurationSeconds,
+    double musicStartOffsetSeconds = 0,
   }) async {
     File? downloaded;
     try {
@@ -196,6 +207,7 @@ class MediaUtil {
         audioPath: audioPath,
         outputPath: outputPath,
         maxDurationSeconds: maxDurationSeconds,
+        musicStartOffsetSeconds: musicStartOffsetSeconds,
       );
       if (muxed != null) {
         await _deleteIfExists(downloaded);

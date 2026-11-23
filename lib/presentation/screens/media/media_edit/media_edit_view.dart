@@ -188,11 +188,11 @@ class _MediaEditViewState extends State<MediaEditView>
 
   void _bindCarouselSoundSegmentLoop(
     AudioPlayer player, {
-    required int segmentStartSeconds,
+    required int segmentStartMilliseconds,
     required int segmentDurationSeconds,
   }) {
     _imageSoundSegmentSub?.cancel();
-    final startMs = segmentStartSeconds * 1000;
+    final startMs = segmentStartMilliseconds;
     final endMs = startMs + segmentDurationSeconds * 1000;
     _imageSoundSegmentSub = player.onPositionChanged.listen((position) {
       if (position.inMilliseconds >= endMs - 80) {
@@ -222,9 +222,11 @@ class _MediaEditViewState extends State<MediaEditView>
       state.mediaEditItems,
       state.currentIndex,
     );
+    final trackStartMs =
+        PostSoundUtil.soundTrackStartOffsetMilliseconds(sound);
     final segmentDuration =
         PostSoundUtil.carouselItemDurationSecondsForEditItem(currentItem);
-    final clipKey = '$url#$segmentStart#$segmentDuration';
+    final clipKey = '$url#${trackStartMs + segmentStart * 1000}#$segmentDuration';
     if (_imageSoundPreviewClipKey == clipKey &&
         _imageSoundPlayer?.state == PlayerState.playing) {
       return;
@@ -240,12 +242,14 @@ class _MediaEditViewState extends State<MediaEditView>
       _imageSoundPlayer = player;
       await player.setReleaseMode(ReleaseMode.stop);
       IsrImageSoundRegistry.register(player);
-      final startOffset = Duration(seconds: segmentStart);
+      final startMs =
+          trackStartMs + segmentStart * 1000;
+      final startOffset = Duration(milliseconds: startMs);
       await player.setSource(audioSourceFromUrlOrPath(url));
       await player.seek(startOffset);
       _bindCarouselSoundSegmentLoop(
         player,
-        segmentStartSeconds: segmentStart,
+        segmentStartMilliseconds: startMs,
         segmentDurationSeconds: segmentDuration,
       );
       await player.resume();
@@ -628,15 +632,24 @@ class _MediaEditViewState extends State<MediaEditView>
     final carouselOverlay = PostSoundUtil.useCarouselPostSoundOverlayForEditItems(
       state.mediaEditItems,
     );
+    final carouselStartSec = carouselOverlay
+        ? PostSoundUtil.carouselSoundStartOffsetSecondsForEditItems(
+            state.mediaEditItems,
+            state.currentIndex,
+          )
+        : 0;
+    final previewOffsetMs = PostSoundUtil.postSoundPreviewOffsetMilliseconds(
+      sound: mediaItem.sound,
+      carouselSliceStartSeconds: carouselStartSec,
+    );
     return VideoPreviewWidget(
+      key: ValueKey(
+        '${mediaItem.originalPath}|${mediaItem.sound?.soundId}|$previewOffsetMs',
+      ),
       mediaEditItem: mediaItem,
       onRemoveMedia: () => _removeCurrentMedia(state),
       mediaEditConfig: widget.mediaEditConfig,
-      postSoundStartOffsetSeconds:
-          PostSoundUtil.carouselSoundStartOffsetSecondsForEditItems(
-        state.mediaEditItems,
-        state.currentIndex,
-      ),
+      postSoundStartOffsetMilliseconds: previewOffsetMs,
       forcePostLevelSoundOverlay: carouselOverlay,
     );
   }

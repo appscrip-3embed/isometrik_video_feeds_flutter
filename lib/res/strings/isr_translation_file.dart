@@ -498,6 +498,15 @@ class IsrTranslationFile {
   static String get couldNotUpdateSavedSound => isrTr('couldNotUpdateSavedSound');
   static String get lyrics => isrTr('lyrics');
   static String get useThisSound => isrTr('useThisSound');
+  static String get chooseSoundStart => isrTr('chooseSoundStart');
+  static String get dragToSelectSoundStart => isrTr('dragToSelectSoundStart');
+  static String get startsAt => isrTr('startsAt');
+  static String get soundStartManualLabel => isrTr('soundStartManualLabel');
+  static String get soundStartManualHint => isrTr('soundStartManualHint');
+  static String get soundStartManualInvalid => isrTr('soundStartManualInvalid');
+  static String get playingAt => isrTr('playingAt');
+  static String get pausedAt => isrTr('pausedAt');
+  static String get soundSetStartToPlayback => isrTr('soundSetStartToPlayback');
   static String get uploadPhotoOrVideoToInspire => isrTr(
         'uploadPhotoOrVideoToInspire',
         namedArgs: {'appName': IsrAppConstants.appName},

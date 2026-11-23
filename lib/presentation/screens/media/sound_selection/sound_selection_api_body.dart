@@ -7,8 +7,9 @@ import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/presentation/presentation.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/sound_selection/sound_selection_screen.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/sound_selection/sound_selection_theme.dart';
+import 'package:ism_video_reel_player/presentation/screens/media/sound_selection/sound_track_start_picker_screen.dart';
 import 'package:ism_video_reel_player/res/res.dart';
-import 'package:ism_video_reel_player/utils/isr_image_sound_registry.dart';
+import 'package:ism_video_reel_player/utils/sound_picker_preview_audio.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 
 /// Live sounds library backed by `/api/v1/sounds/*` (dub / add-sound features).
@@ -32,9 +33,10 @@ class SoundSelectionApiBody extends StatefulWidget {
 class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     with WidgetsBindingObserver {
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   final _debouncer = DeBouncer(duration: const Duration(milliseconds: 400));
   late final SoundLibraryUseCase _useCase;
-  AudioPlayer? _audioPlayer;
+  final Object _previewOwner = Object();
   StreamSubscription<PlayerState>? _playerStateSub;
 
   String _query = '';
@@ -66,15 +68,18 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   bool _savedHasMore = true;
   bool _loadingMore = false;
 
+  int _searchPage = 1;
+  bool _searchHasMore = true;
+
+  static const int _pageSize = SoundLibraryUseCase.defaultPageSize;
+
   Widget _musicThumb(double size) => SoundMusicThumbnail(size: size);
 
-  AudioPlayer get _player {
-    _audioPlayer ??= AudioPlayer();
-    _playerStateSub ??= _audioPlayer!.onPlayerStateChanged.listen((state) {
-      if (!mounted) return;
-      setState(() => _isPlaying = state == PlayerState.playing);
-    });
-    return _audioPlayer!;
+  Widget _miniPlayerThumb(double size) => SoundMiniPlayerThumbnail(size: size);
+
+  void _dismissSearchKeyboard() {
+    _searchFocusNode.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
   }
 
   @override
@@ -83,7 +88,11 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     WidgetsBinding.instance.addObserver(this);
     _useCase = IsmInjectionUtils.getUseCase<SoundLibraryUseCase>();
     _listScrollController.addListener(_onListScroll);
-    // Lazy-create player on first interaction to avoid late-init edge cases.
+    unawaited(SoundPickerPreviewAudio.claim(_previewOwner));
+    _playerStateSub = SoundPickerPreviewAudio.stateStream.listen((state) {
+      if (!mounted) return;
+      setState(() => _isPlaying = state == PlayerState.playing);
+    });
     unawaited(_loadSections());
   }
 
@@ -91,14 +100,11 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _listScrollController.removeListener(_onListScroll);
     _listScrollController.dispose();
     _playerStateSub?.cancel();
-    final player = _audioPlayer;
-    if (player != null) {
-      IsrImageSoundRegistry.unregister(player);
-      unawaited(player.dispose());
-    }
+    unawaited(SoundPickerPreviewAudio.shutdown());
     super.dispose();
   }
 
@@ -110,11 +116,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   }
 
   Future<void> _stopPreviewForLifecycle() async {
-    final player = _audioPlayer;
-    if (player == null) return;
-    try {
-      await player.stop();
-    } catch (_) {}
+    await SoundPickerPreviewAudio.stop();
     if (mounted) {
       setState(() => _isPlaying = false);
     }
@@ -149,27 +151,53 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
       _trendingPage = 1;
       _recommendedPage = 1;
       _savedPage = 1;
-      _recentHasMore = _recent.length >= 20;
-      _trendingHasMore = _trending.length >= 10;
-      _recommendedHasMore = _recommended.length >= 10;
-      _savedHasMore = _saved.length >= 20;
+      _recentHasMore = _recent.length >= _pageSize;
+      _trendingHasMore = _trending.length >= _pageSize;
+      _recommendedHasMore = _recommended.length >= _pageSize;
+      _savedHasMore = _saved.length >= _pageSize;
+      _searchPage = 1;
+      _searchHasMore = true;
       _loadingMore = false;
     });
   }
 
-  Future<void> _runSearch(String query) async {
+  Future<void> _runSearch(String query, {bool reset = true}) async {
     if (query.isEmpty) {
-      setState(() => _searchResults = []);
+      setState(() {
+        _searchResults = [];
+        _searchPage = 1;
+        _searchHasMore = true;
+      });
       return;
+    }
+    if (reset) {
+      setState(() {
+        _searchPage = 1;
+        _searchHasMore = true;
+      });
     }
     final categoryIds = _categoryId;
     final result = await _useCase.searchSounds(
       isLoading: false,
       query: query,
       categoryIds: categoryIds,
+      page: _searchPage,
+      pageSize: _pageSize,
     );
     if (!mounted) return;
-    setState(() => _searchResults = result.data ?? []);
+    final items = result.data ?? [];
+    setState(() {
+      if (reset || _searchPage == 1) {
+        _searchResults = items;
+      } else {
+        final seen = _searchResults.map((e) => e.id).toSet();
+        _searchResults = [
+          ..._searchResults,
+          ...items.where((t) => !seen.contains(t.id)),
+        ];
+      }
+      _searchHasMore = items.length >= _pageSize;
+    });
   }
 
   void _onSearchChanged(String value) {
@@ -187,6 +215,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
       list.where(_matchesCategory).toList();
 
   Future<void> _toggleTrackPreview(SoundTrack track) async {
+    _dismissSearchKeyboard();
     final previewUrl = track.trackUrl.trim();
     if (previewUrl.isEmpty) {
       if (!mounted) return;
@@ -198,9 +227,9 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
 
     if (_activeTrack?.id == track.id) {
       if (_isPlaying) {
-        await _player.pause();
+        await SoundPickerPreviewAudio.pause();
       } else {
-        await _player.resume();
+        await SoundPickerPreviewAudio.resumeIfPaused();
       }
       return;
     }
@@ -214,9 +243,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
       if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
         throw FormatException('Invalid preview URL: $previewUrl');
       }
-      await _player.stop();
-      await _player.setSourceUrl(uri.toString());
-      await _player.resume();
+      await SoundPickerPreviewAudio.playListPreview(previewUrl);
     } catch (error, stackTrace) {
       debugPrint('Sound preview failed for $previewUrl');
       debugPrint('Preview error: $error');
@@ -254,7 +281,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     final section = _activeSection;
     if (section == 'all' || _loadingMore || !_sectionHasMore(section)) return;
     setState(() => _loadingMore = true);
-    const pageSize = 20;
+    final pageSize = _pageSize;
     final nextPage = switch (section) {
       'recent' => _recentPage + 1,
       'trending' => _trendingPage + 1,
@@ -289,12 +316,39 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
         _recent = items;
       } else if (section == 'saved') {
         _savedPage = nextPage;
-        _savedHasMore = items.length >= nextPage * pageSize;
-        _saved = items;
-        _savedTrackIds
-          ..clear()
-          ..addAll(_saved.map((e) => e.id));
+        _savedHasMore = items.length >= pageSize;
+        final seen = _saved.map((e) => e.id).toSet();
+        _saved = [
+          ..._saved,
+          ...items.where((t) => !seen.contains(t.id)),
+        ];
+        _savedTrackIds.addAll(items.map((e) => e.id));
       }
+      _loadingMore = false;
+    });
+  }
+
+  Future<void> _loadMoreSearch() async {
+    if (_query.isEmpty || _loadingMore || !_searchHasMore) return;
+    setState(() => _loadingMore = true);
+    final nextPage = _searchPage + 1;
+    final result = await _useCase.searchSounds(
+      isLoading: false,
+      query: _query,
+      categoryIds: _categoryId,
+      page: nextPage,
+      pageSize: _pageSize,
+    );
+    if (!mounted) return;
+    final items = result.data ?? [];
+    setState(() {
+      _searchPage = nextPage;
+      final seen = _searchResults.map((e) => e.id).toSet();
+      _searchResults = [
+        ..._searchResults,
+        ...items.where((t) => !seen.contains(t.id)),
+      ];
+      _searchHasMore = items.length >= _pageSize;
       _loadingMore = false;
     });
   }
@@ -302,7 +356,15 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   void _onListScroll() {
     if (!_listScrollController.hasClients) return;
     final searching = _query.isNotEmpty;
-    if (searching || _activeSection == 'all') return;
+    if (searching) {
+      final position = _listScrollController.position;
+      if (position.pixels >=
+          position.maxScrollExtent - 180.responsiveDimension) {
+        unawaited(_loadMoreSearch());
+      }
+      return;
+    }
+    if (_activeSection == 'all') return;
     final position = _listScrollController.position;
     if (position.pixels >= position.maxScrollExtent - 180.responsiveDimension) {
       unawaited(_loadMoreForSection());
@@ -347,32 +409,51 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   Future<void> _toggleMiniPlayerPlayback() async {
     if (_activeTrack == null) return;
     if (_isPlaying) {
-      await _player.pause();
+      await SoundPickerPreviewAudio.pause();
     } else {
-      await _player.resume();
+      await SoundPickerPreviewAudio.resumeIfPaused();
     }
   }
 
   Future<void> _useSelectedSound() async {
+    _dismissSearchKeyboard();
     final track = _activeTrack;
     if (track == null) return;
-    await _player.pause();
+    await SoundPickerPreviewAudio.stop();
+    await SoundPickerPreviewAudio.release(_previewOwner);
     if (!mounted) return;
     if (widget.onTrackSelected != null) {
-      // Caller owns navigation (e.g. [SoundLibraryPickerScreen] pops with result).
-      widget.onTrackSelected!(track);
+      final item = await SoundTrackStartPickerScreen.pickForMediaEdit(
+        context,
+        track,
+      );
+      if (!mounted) return;
+      if (item == null) {
+        await SoundPickerPreviewAudio.claim(_previewOwner);
+        return;
+      }
+      await SoundPickerPreviewAudio.shutdown();
+      if (!mounted) return;
+      Navigator.of(context).pop(item);
       return;
     }
-    widget.cameraBloc?.add(
-      CameraSetMusicEvent(
-        musicId: track.id,
-        musicName: track.title,
-        musicArtist: track.author,
-        musicThumbnailUrl: track.thumbnailUrl,
-        musicDurationSeconds: track.duration.inSeconds,
-        musicPreviewUrl: track.trackUrl,
-      ),
+    final cameraBloc = widget.cameraBloc;
+    if (cameraBloc == null) {
+      await SoundPickerPreviewAudio.claim(_previewOwner);
+      return;
+    }
+    final applied = await SoundTrackStartPickerScreen.pickForCamera(
+      context,
+      track: track,
+      cameraBloc: cameraBloc,
     );
+    if (!mounted) return;
+    if (!applied) {
+      await SoundPickerPreviewAudio.claim(_previewOwner);
+      return;
+    }
+    await SoundPickerPreviewAudio.shutdown();
+    if (!mounted) return;
     Navigator.of(context).pop();
   }
 
@@ -481,9 +562,9 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 height: 36.responsiveDimension,
                                 fit: BoxFit.cover,
                                 placeHolderWidget: (_, __) =>
-                                    _musicThumb(36.responsiveDimension),
+                                    _miniPlayerThumb(36.responsiveDimension),
                               )
-                            : _musicThumb(36.responsiveDimension),
+                            : _miniPlayerThumb(36.responsiveDimension),
                       ),
                       SizedBox(width: 8.responsiveDimension),
                       Expanded(
@@ -573,6 +654,12 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
             ),
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (value) {
+                _dismissSearchKeyboard();
+                unawaited(_runSearch(value.trim()));
+              },
               onChanged: _onSearchChanged,
               style: TextStyle(
                 color: st.onSurface,
@@ -638,11 +725,19 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                           ),
                         ),
                       )
-                    : ListView(
-                        controller: _listScrollController,
-                        padding:
-                            EdgeInsets.only(bottom: 24.responsiveDimension),
-                        children: [
+                    : NotificationListener<ScrollStartNotification>(
+                        onNotification: (_) {
+                          _dismissSearchKeyboard();
+                          return false;
+                        },
+                        child: ListView(
+                          controller: _listScrollController,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: EdgeInsets.only(
+                            bottom: 24.responsiveDimension,
+                          ),
+                          children: [
                           if (_categories.isNotEmpty && !searching) ...[
                             Padding(
                               padding: EdgeInsets.fromLTRB(
@@ -716,7 +811,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                               height: MediaQuery.sizeOf(context).height * 0.42,
                               child: _buildFullScreenEmptyState(st),
                             ),
-                          if (searching)
+                          if (searching) ...[
                             if (!showFullScreenEmpty)
                               SoundListSection(
                                 title: IsrTranslationFile.results,
@@ -727,6 +822,23 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
                               ),
+                            if (_loadingMore)
+                              Padding(
+                                padding: EdgeInsets.symmetric(
+                                  vertical: 16.responsiveDimension,
+                                ),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 22.responsiveDimension,
+                                    height: 22.responsiveDimension,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      color: st.selectionAccent,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                           if (!searching) ...[
                             if (showRecentInAll && !showFullScreenEmpty)
                               SoundListSection(
@@ -826,6 +938,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                               ),
                           ],
                         ],
+                        ),
                       ),
           ),
         ],

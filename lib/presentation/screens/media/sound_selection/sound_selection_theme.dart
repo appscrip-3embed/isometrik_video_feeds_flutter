@@ -65,22 +65,17 @@ class SoundPickerTheme {
           ? Colors.white.withValues(alpha: 0.08)
           : _cs.surfaceContainerHighest.withValues(alpha: 0.85));
 
-  Color get chipSurface => _usesSdkTheme
-      ? IsrColors.secondaryColor
-      : (_isDark
-          ? Colors.white.withValues(alpha: 0.06)
-          : _cs.surfaceContainerHighest.withValues(alpha: 0.65));
+  /// Neutral inset surfaces (never host secondary — Dubly secondary is often red).
+  Color get chipSurface => searchFieldFill;
 
-  Color get filterChipBackground => _usesSdkTheme
-      ? IsrColors.secondaryColor
-      : (_isDark
-          ? Colors.white.withValues(alpha: 0.08)
-          : const Color(0xFFF6E6FF));
+  /// Unselected chips, thumbnails, and controls: light **primary** tint only.
+  Color get filterChipBackground => _isDark
+      ? Colors.white.withValues(alpha: 0.08)
+      : selectionAccent.withValues(alpha: 0.1);
 
   Color get filterChipOnSelected => Colors.white;
 
-  Color get filterChipOnUnselected =>
-      _usesSdkTheme ? IsrColors.appColor : onSurface;
+  Color get filterChipOnUnselected => selectionAccent;
 
   Color get chipBorderUnselected => _isDark
       ? Colors.white.withValues(alpha: 0.15)
@@ -100,13 +95,45 @@ class SoundPickerTheme {
 
   Color get playIcon => Colors.white;
 
-  Color get musicThumbnailBackground => _usesSdkTheme
-      ? IsrColors.appColor.withValues(alpha: 0.15)
-      : (_isDark
-          ? Colors.white.withValues(alpha: 0.08)
-          : const Color(0xFFF6E6FF));
+  /// Light lavender tile behind list thumbnails (Dubly purple tint).
+  Color get musicThumbnailBackground => filterChipBackground;
 
-  Color get musicThumbnailIcon => selectionAccent;
+  Color get musicThumbnailIcon => selectionAccent.withValues(alpha: 0.85);
+
+  /// Elevated card on the start-time picker (white / dark surface, not flat grey).
+  Color get trackSummaryCardFill => _isDark
+      ? Colors.white.withValues(alpha: 0.06)
+      : Colors.white;
+
+  Color get trackSummaryCardBorder =>
+      selectionAccent.withValues(alpha: _isDark ? 0.35 : 0.2);
+}
+
+/// Thumbnail on the purple bottom “selected sound” bar (high contrast).
+class SoundMiniPlayerThumbnail extends StatelessWidget {
+  const SoundMiniPlayerThumbnail({required this.size, super.key});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final st = SoundPickerTheme.of(context);
+    // ~8px corner at 36dp thumb (same as list mini-player clip radius).
+    final radius = size * (8 / 36);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Icon(
+        Icons.music_note_rounded,
+        size: size * 0.52,
+        color: st.selectionAccent,
+      ),
+    );
+  }
 }
 
 /// Default music note thumbnail for sound list rows (theme-aware).

@@ -90,6 +90,7 @@ class CameraSetMusicEvent extends CameraEvent {
     this.musicThumbnailUrl,
     this.musicDurationSeconds,
     this.musicPreviewUrl,
+    this.musicStartTimeSeconds = 0,
   });
 
   final String? musicId;
@@ -98,6 +99,8 @@ class CameraSetMusicEvent extends CameraEvent {
   final String? musicThumbnailUrl;
   final int? musicDurationSeconds;
   final String? musicPreviewUrl;
+  /// Offset into the full track when framing / posting (fractional seconds).
+  final double musicStartTimeSeconds;
 }
 
 class CameraRemoveMusicEvent extends CameraEvent {}
