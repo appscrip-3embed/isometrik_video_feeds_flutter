@@ -48,6 +48,8 @@ class _MediaEditViewState extends State<MediaEditView>
   late final MediaEditBloc _bloc;
   AudioPlayer? _imageSoundPlayer;
   String? _imageSoundPreviewUrl;
+  String? _imageSoundPreviewClipKey;
+  StreamSubscription<Duration>? _imageSoundSegmentSub;
 
   @override
   void initState() {
@@ -144,8 +146,7 @@ class _MediaEditViewState extends State<MediaEditView>
     if (!_isRouteVisible) return;
     final blocState = _bloc.state;
     if (blocState is MediaEditLoadedState) {
-      final item = blocState.mediaEditItems[blocState.currentIndex];
-      unawaited(_syncImageSoundPreview(item));
+      unawaited(_syncImageSoundPreview(blocState));
     }
   }
 
@@ -163,6 +164,9 @@ class _MediaEditViewState extends State<MediaEditView>
 
   Future<void> _stopImageSoundPreview() async {
     _imageSoundPreviewUrl = null;
+    _imageSoundPreviewClipKey = null;
+    await _imageSoundSegmentSub?.cancel();
+    _imageSoundSegmentSub = null;
     final player = _imageSoundPlayer;
     _imageSoundPlayer = null;
     if (player != null) {
@@ -174,26 +178,77 @@ class _MediaEditViewState extends State<MediaEditView>
     }
   }
 
-  Future<void> _syncImageSoundPreview(MediaEditItem item) async {
-    if (item.mediaType != EditMediaType.image) {
+  MediaEditSoundItem? _soundForCarouselPreview(MediaEditLoadedState state) {
+    for (final item in state.mediaEditItems) {
+      final url = item.sound?.soundUrl?.trim() ?? '';
+      if (url.isNotEmpty) return item.sound;
+    }
+    return null;
+  }
+
+  void _bindCarouselSoundSegmentLoop(
+    AudioPlayer player, {
+    required int segmentStartSeconds,
+    required int segmentDurationSeconds,
+  }) {
+    _imageSoundSegmentSub?.cancel();
+    final startMs = segmentStartSeconds * 1000;
+    final endMs = startMs + segmentDurationSeconds * 1000;
+    _imageSoundSegmentSub = player.onPositionChanged.listen((position) {
+      if (position.inMilliseconds >= endMs - 80) {
+        unawaited(player.seek(Duration(milliseconds: startMs)));
+      }
+    });
+  }
+
+  Future<void> _syncImageSoundPreview(MediaEditLoadedState state) async {
+    if (!_isRouteVisible) {
       await _stopImageSoundPreview();
       return;
     }
-    final url = item.sound?.soundUrl?.trim() ?? '';
+    final currentItem = state.mediaEditItems[state.currentIndex];
+    if (currentItem.mediaType != EditMediaType.image) {
+      await _stopImageSoundPreview();
+      return;
+    }
+    final sound = _soundForCarouselPreview(state);
+    final url = sound?.soundUrl?.trim() ?? '';
     if (url.isEmpty) {
       await _stopImageSoundPreview();
       return;
     }
-    if (_imageSoundPreviewUrl == url) return;
+
+    final segmentStart = PostSoundUtil.carouselSoundStartOffsetSecondsForEditItems(
+      state.mediaEditItems,
+      state.currentIndex,
+    );
+    final segmentDuration =
+        PostSoundUtil.carouselItemDurationSecondsForEditItem(currentItem);
+    final clipKey = '$url#$segmentStart#$segmentDuration';
+    if (_imageSoundPreviewClipKey == clipKey &&
+        _imageSoundPlayer?.state == PlayerState.playing) {
+      return;
+    }
+
     await _stopImageSoundPreview();
     _imageSoundPreviewUrl = url;
+    _imageSoundPreviewClipKey = clipKey;
+
     try {
       await IsrImageSoundRegistry.stopAll();
       final player = AudioPlayer();
       _imageSoundPlayer = player;
-      await player.setReleaseMode(ReleaseMode.loop);
+      await player.setReleaseMode(ReleaseMode.stop);
       IsrImageSoundRegistry.register(player);
-      await player.play(UrlSource(url));
+      final startOffset = Duration(seconds: segmentStart);
+      await player.setSource(audioSourceFromUrlOrPath(url));
+      await player.seek(startOffset);
+      _bindCarouselSoundSegmentLoop(
+        player,
+        segmentStartSeconds: segmentStart,
+        segmentDurationSeconds: segmentDuration,
+      );
+      await player.resume();
     } catch (_) {
       await _stopImageSoundPreview();
     }
@@ -419,9 +474,8 @@ class _MediaEditViewState extends State<MediaEditView>
                     } else if (state is MediaEditEmptyState) {
                       return const Center(child: Text('No media selected'));
                     } else if (state is MediaEditLoadedState) {
-                      final previewItem = state.mediaEditItems[state.currentIndex];
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) unawaited(_syncImageSoundPreview(previewItem));
+                        if (mounted) unawaited(_syncImageSoundPreview(state));
                       });
                       return Stack(
                         children: [
@@ -570,12 +624,22 @@ class _MediaEditViewState extends State<MediaEditView>
     }
   }
 
-  Widget _buildVideoContent(MediaEditItem mediaItem, MediaEditLoadedState state) =>
-      VideoPreviewWidget(
-        mediaEditItem: mediaItem,
-        onRemoveMedia: () => _removeCurrentMedia(state),
-        mediaEditConfig: widget.mediaEditConfig,
-      );
+  Widget _buildVideoContent(MediaEditItem mediaItem, MediaEditLoadedState state) {
+    final carouselOverlay = PostSoundUtil.useCarouselPostSoundOverlayForEditItems(
+      state.mediaEditItems,
+    );
+    return VideoPreviewWidget(
+      mediaEditItem: mediaItem,
+      onRemoveMedia: () => _removeCurrentMedia(state),
+      mediaEditConfig: widget.mediaEditConfig,
+      postSoundStartOffsetSeconds:
+          PostSoundUtil.carouselSoundStartOffsetSecondsForEditItems(
+        state.mediaEditItems,
+        state.currentIndex,
+      ),
+      forcePostLevelSoundOverlay: carouselOverlay,
+    );
+  }
 
   Widget _buildImageContent(MediaEditItem mediaItem) => Container(
         width: double.infinity,

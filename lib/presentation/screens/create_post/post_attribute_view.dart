@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/mode
 import 'package:ism_video_reel_player/presentation/screens/media/media_selection/media_selection.dart'
     as ms;
 import 'package:ism_video_reel_player/res/res.dart';
+import 'package:ism_video_reel_player/utils/isr_image_sound_registry.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:lottie/lottie.dart';
 import 'package:video_player/video_player.dart';
@@ -144,6 +146,9 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
 
   @override
   void initState() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(IsrImageSoundRegistry.stopAll());
+    });
     _createPostBloc = context.getOrCreateBloc();
     _progressCubit = context.getOrCreateBloc();
     _socialActionCubit = context.getOrCreateBloc();

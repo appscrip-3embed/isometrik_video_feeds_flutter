@@ -8,6 +8,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/mode
 import 'package:ism_video_reel_player/presentation/screens/media/media_selection/media_selection.dart'
     as ms;
 import 'package:ism_video_reel_player/res/res.dart';
+import 'package:ism_video_reel_player/utils/isr_image_sound_registry.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -103,6 +104,9 @@ abstract final class CreatePostFlowCoordinator {
       return false;
     }
 
+    // Editor may still hold an image sound preview; stop before posting screen.
+    await IsrImageSoundRegistry.stopAll();
+
     final postResult = await _pushPostAttributeStacked(
       context,
       mediaDataList: mediaDataList,
@@ -140,7 +144,8 @@ abstract final class CreatePostFlowCoordinator {
           addMoreMedia: (editMedia) => addMoreMedia(
             context,
             editMedia: editMedia,
-            selectedSound: initialSound,
+            selectedSound:
+                _soundFromEditItems(editMedia) ?? initialSound,
           ),
           pickCoverPic: () => pickCoverPic(context),
           onSelectSound:
@@ -369,44 +374,57 @@ abstract final class CreatePostFlowCoordinator {
 
     final mediaEditItems = <me.MediaEditItem>[];
     for (final media in selectedMedia) {
-      if (media.mediaType == ms.SelectedMediaType.video &&
-          media.sound?.soundUrl?.isNotEmpty == true &&
-          !media.soundAppliedToVideo &&
-          media.localPath?.isNotEmpty == true) {
-        final muxed = await PostSoundUtil.muxVideoWithSound(
-          videoPath: media.localPath!,
-          sound: media.sound!,
-        );
-        if (!context.mounted) return [];
-        media.localPath = muxed;
-        media.file = File(muxed);
-        media.soundAppliedToVideo = true;
-      }
       mediaEditItems.add(
         mapSelectedToEditMedia(media, initialSound: initialSound),
       );
     }
 
     final preselectedSound = initialSound;
+    final useCarouselOverlay =
+        PostSoundUtil.useCarouselPostSoundOverlayForEditItems(mediaEditItems);
+
     if (preselectedSound != null && preselectedSound.soundId?.isNotEmpty == true) {
-      for (var i = 0; i < mediaEditItems.length; i++) {
-        final item = mediaEditItems[i];
-        if (item.mediaType == me.EditMediaType.video) {
-          var editedPath = item.editedPath ?? item.originalPath;
-          if (preselectedSound.soundUrl?.isNotEmpty == true) {
-            editedPath = await PostSoundUtil.muxVideoWithSound(
-              videoPath: editedPath,
-              sound: preselectedSound,
+      if (useCarouselOverlay) {
+        for (var i = 0; i < mediaEditItems.length; i++) {
+          mediaEditItems[i] =
+              mediaEditItems[i].copyWith(sound: preselectedSound);
+        }
+      } else {
+        for (var i = 0; i < mediaEditItems.length; i++) {
+          final item = mediaEditItems[i];
+          if (item.mediaType == me.EditMediaType.video) {
+            var editedPath = item.editedPath ?? item.originalPath;
+            if (preselectedSound.soundUrl?.isNotEmpty == true) {
+              editedPath = await PostSoundUtil.muxVideoWithSound(
+                videoPath: editedPath,
+                sound: preselectedSound,
+              );
+            }
+            if (!context.mounted) return [];
+            mediaEditItems[i] = item.copyWith(
+              editedPath: editedPath,
+              sound: item.sound ?? preselectedSound,
             );
+          } else if (item.mediaType == me.EditMediaType.image) {
+            mediaEditItems[i] = item.copyWith(sound: preselectedSound);
           }
-          if (!context.mounted) return [];
-          mediaEditItems[i] = item.copyWith(
-            editedPath: editedPath,
-            sound: item.sound ?? preselectedSound,
+        }
+      }
+    }
+
+    // Single-video flow from gallery+camera may still need one-off mux.
+    if (!useCarouselOverlay && mediaEditItems.length == 1) {
+      for (final media in selectedMedia) {
+        if (media.mediaType == ms.SelectedMediaType.video &&
+            media.sound?.soundUrl?.isNotEmpty == true &&
+            !media.soundAppliedToVideo &&
+            media.localPath?.isNotEmpty == true) {
+          final muxed = await PostSoundUtil.muxVideoWithSound(
+            videoPath: media.localPath!,
+            sound: media.sound!,
           );
-        } else if (item.mediaType == me.EditMediaType.image &&
-            item.sound?.soundId?.isNotEmpty != true) {
-          mediaEditItems[i] = item.copyWith(sound: preselectedSound);
+          if (!context.mounted) return [];
+          mediaEditItems[0] = mediaEditItems.first.copyWith(editedPath: muxed);
         }
       }
     }
@@ -469,6 +487,15 @@ abstract final class CreatePostFlowCoordinator {
       selectedMedia: res,
       initialSound: selectedSound,
     );
+    final soundForCarousel =
+        _soundFromEditItems(editMedia) ?? selectedSound;
+    if (soundForCarousel != null &&
+        PostSoundUtil.useCarouselPostSoundOverlayForEditItems([
+          ...editMedia,
+          ...prepared,
+        ])) {
+      PostSoundUtil.applySoundToAllEditItems(prepared, soundForCarousel);
+    }
     return prepared;
   }
 
@@ -540,13 +567,12 @@ abstract final class CreatePostFlowCoordinator {
     ];
   }
 
-  static MediaEditSoundItem? _soundFromEditItems(
-    List<me.MediaEditItem> editedMedia,
-  ) =>
-      editedMedia
-          .where((e) => e.sound?.soundId?.isNotEmpty == true)
-          .map((e) => e.sound)
-          .firstOrNull;
+  /// Sound already chosen on any slide in the media editor (for add-more propagation).
+  static MediaEditSoundItem? soundFromEditItems(List<me.MediaEditItem> editedMedia) =>
+      PostSoundUtil.firstSoundOnEditItems(editedMedia);
+
+  static MediaEditSoundItem? _soundFromEditItems(List<me.MediaEditItem> editedMedia) =>
+      soundFromEditItems(editedMedia);
 
   static Future<String?> _generateVideoThumbnail(String? videoPath) async {
     if (videoPath == null || videoPath.isEmpty) return null;

@@ -13,9 +13,15 @@ class VideoPreviewWidget extends StatefulWidget {
     required this.mediaEditItem,
     required this.onRemoveMedia,
     required this.mediaEditConfig,
+    this.postSoundStartOffsetSeconds = 0,
+    this.forcePostLevelSoundOverlay = false,
   });
 
   final MediaEditItem mediaEditItem;
+  /// Seek position on the post soundtrack before this video slice (mixed carousel).
+  final int postSoundStartOffsetSeconds;
+  /// When true, play [MediaEditItem.sound] as overlay (mute file audio) even if muxed.
+  final bool forcePostLevelSoundOverlay;
   final VoidCallback onRemoveMedia;
   final MediaEditConfig mediaEditConfig;
 
@@ -42,7 +48,8 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
   }
 
   bool get _usesSeparateSoundPreview =>
-      _hasSelectedSound && !_soundMuxedIntoVideo;
+      _hasSelectedSound &&
+      (!_soundMuxedIntoVideo || widget.forcePostLevelSoundOverlay);
 
   @override
   void initState() {
@@ -243,7 +250,9 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
       _videoEnded = false;
       final maxPosition = duration - const Duration(milliseconds: 50);
       final targetPosition = position > maxPosition ? maxPosition : position;
-      await player.seek(targetPosition);
+      final trackPosition = Duration(seconds: widget.postSoundStartOffsetSeconds) +
+          targetPosition;
+      await player.seek(trackPosition);
       await player.resume();
 
       final remaining = duration - targetPosition;

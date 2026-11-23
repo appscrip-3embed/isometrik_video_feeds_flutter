@@ -2206,23 +2206,15 @@ class CreatePostBloc extends Bloc<CreatePostEvent, CreatePostState> {
     final resolved = sound ?? _soundItemFromRequest(request);
     if (!PostSoundUtil.isLibrarySoundId(resolved?.soundId)) return;
 
-    final hasVideo = _mediaDataList.any(
-      (m) => m.mediaType == 'video' || m.postType == PostType.video,
-    );
-    final isImageOnly = _mediaDataList.isNotEmpty && !hasVideo;
-    final imageCount = PostSoundUtil.imageCountFromMediaData(_mediaDataList);
-    final imageClipSec = PostSoundUtil.imagePostSoundDurationSeconds(imageCount);
-    final videoDuration = _mediaDataList
-        .where((m) => m.mediaType == 'video' || m.postType == PostType.video)
-        .map((m) => m.duration?.toInt())
-        .whereType<int>()
-        .firstOrNull;
+    final totalCarouselSec =
+        PostSoundUtil.carouselPostSoundDurationSecondsFromMedia(_mediaDataList);
+    final clipCap = totalCarouselSec > 60 ? 60 : totalCarouselSec;
 
     _pendingCreatePostSoundId = resolved!.soundId!.trim();
     _pendingCreatePostSoundSnapshot = PostSoundUtil.buildSoundSnapshot(
       sound: resolved,
-      videoDurationSeconds: isImageOnly ? imageClipSec : videoDuration,
-      maxClipSec: isImageOnly ? imageClipSec : 60,
+      videoDurationSeconds: totalCarouselSec,
+      maxClipSec: clipCap,
     );
     _createPostRequest.soundId = _pendingCreatePostSoundId;
     _createPostRequest.soundSnapshot = _pendingCreatePostSoundSnapshot;
@@ -2286,22 +2278,14 @@ class CreatePostBloc extends Bloc<CreatePostEvent, CreatePostState> {
       return;
     }
     sound = resolved;
-    final hasVideo = _mediaDataList.any(
-      (m) => m.mediaType == 'video' || m.postType == PostType.video,
-    );
-    final isImageOnly = _mediaDataList.isNotEmpty && !hasVideo;
-    final imageCount = PostSoundUtil.imageCountFromMediaData(_mediaDataList);
-    final imageClipSec = PostSoundUtil.imagePostSoundDurationSeconds(imageCount);
-    final videoDuration = _mediaDataList
-        .where((m) => m.mediaType == 'video' || m.postType == PostType.video)
-        .map((m) => m.duration?.toInt())
-        .whereType<int>()
-        .firstOrNull;
+    final totalCarouselSec =
+        PostSoundUtil.carouselPostSoundDurationSecondsFromMedia(_mediaDataList);
+    final clipCap = totalCarouselSec > 60 ? 60 : totalCarouselSec;
     _createPostRequest.soundId = sound!.soundId!.trim();
     _createPostRequest.soundSnapshot = PostSoundUtil.buildSoundSnapshot(
       sound: sound,
-      videoDurationSeconds: isImageOnly ? imageClipSec : videoDuration,
-      maxClipSec: isImageOnly ? imageClipSec : 60,
+      videoDurationSeconds: totalCarouselSec,
+      maxClipSec: clipCap,
     );
   }
 

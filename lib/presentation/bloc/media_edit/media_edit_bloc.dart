@@ -108,10 +108,21 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     Emitter<MediaEditState> emit,
   ) async {
     _mediaEditItems.addAll(event.newMedia);
+    _syncCarouselSoundAcrossEditItems();
     emit(MediaEditLoadedState(
       mediaEditItems: List.from(_mediaEditItems),
       currentIndex: _currentIndex,
     ));
+  }
+
+  /// After "add more", share the same soundtrack on every slide (image + video).
+  void _syncCarouselSoundAcrossEditItems() {
+    if (!PostSoundUtil.useCarouselPostSoundOverlayForEditItems(_mediaEditItems)) {
+      return;
+    }
+    final sound = PostSoundUtil.firstSoundOnEditItems(_mediaEditItems);
+    if (sound == null) return;
+    PostSoundUtil.applySoundToAllEditItems(_mediaEditItems, sound);
   }
 
   Future<void> _onSelectMedia(
@@ -252,37 +263,43 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     if (_currentIndex >= _mediaEditItems.length) return;
 
     final sound = event.sound;
-    var item = _mediaEditItems[_currentIndex];
+    final useCarouselOverlay =
+        PostSoundUtil.useCarouselPostSoundOverlayForEditItems(_mediaEditItems);
 
-    if (sound != null &&
-        sound.soundUrl?.isNotEmpty == true &&
-        item.mediaType == EditMediaType.video) {
-      emit(MediaEditLoadedState(
-        mediaEditItems: List.from(_mediaEditItems),
-        currentIndex: _currentIndex,
-        isApplyingSound: true,
-      ));
+    if (sound != null && sound.soundUrl?.isNotEmpty == true) {
+      final item = _mediaEditItems[_currentIndex];
+      if (!useCarouselOverlay && item.mediaType == EditMediaType.video) {
+        emit(MediaEditLoadedState(
+          mediaEditItems: List.from(_mediaEditItems),
+          currentIndex: _currentIndex,
+          isApplyingSound: true,
+        ));
 
-      final videoPath = item.editedPath ?? item.originalPath;
-      final muxed = await PostSoundUtil.muxVideoWithSound(
-        videoPath: videoPath,
-        sound: sound,
-        showLoader: false,
-      );
-      if (muxed == videoPath) {
-        Utility.showToastMessage(
-          'Could not mix audio into this video. Try another sound or clip.',
+        final videoPath = item.editedPath ?? item.originalPath;
+        final muxed = await PostSoundUtil.muxVideoWithSound(
+          videoPath: videoPath,
+          sound: sound,
+          showLoader: false,
         );
+        if (muxed == videoPath) {
+          Utility.showToastMessage(
+            'Could not mix audio into this video. Try another sound or clip.',
+          );
+        }
+        _mediaEditItems[_currentIndex] = item.copyWith(
+          editedPath: muxed,
+          sound: sound,
+        );
+      } else {
+        for (var i = 0; i < _mediaEditItems.length; i++) {
+          _mediaEditItems[i] = _mediaEditItems[i].copyWith(sound: sound);
+        }
       }
-      item = item.copyWith(
-        editedPath: muxed,
-        sound: sound,
-      );
     } else {
-      item = item.copyWith(sound: sound);
+      for (var i = 0; i < _mediaEditItems.length; i++) {
+        _mediaEditItems[i] = _mediaEditItems[i].copyWith(sound: sound);
+      }
     }
-
-    _mediaEditItems[_currentIndex] = item;
     emit(MediaEditLoadedState(
       mediaEditItems: List.from(_mediaEditItems),
       currentIndex: _currentIndex,

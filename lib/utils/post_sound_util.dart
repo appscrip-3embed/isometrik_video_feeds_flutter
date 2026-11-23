@@ -36,6 +36,133 @@ abstract final class PostSoundUtil {
       .where((item) => item.mediaType == EditMediaType.image)
       .length;
 
+  /// Dwell/playback seconds for one carousel item (`mediaType` 0 = image).
+  static int playbackDurationSecondsForCarouselMedia({
+    required int mediaType,
+    required int durationSeconds,
+    int pictureMediaType = 0,
+  }) {
+    if (mediaType == pictureMediaType) {
+      return imageSoundSecondsPerSlide;
+    }
+    return durationSeconds > 0 ? durationSeconds : imageSoundSecondsPerSlide;
+  }
+
+  static int imageSlideIndexAtCarouselPage<T>(
+    List<T> items,
+    int pageIndex,
+    bool Function(T item) isImageSlide,
+  ) {
+    if (items.isEmpty || pageIndex <= 0) return 0;
+    final end = pageIndex < items.length ? pageIndex : items.length;
+    var imageIndex = 0;
+    for (var i = 0; i < end; i++) {
+      if (isImageSlide(items[i])) imageIndex++;
+    }
+    return imageIndex;
+  }
+
+  static int carouselItemDurationSecondsForEditItem(MediaEditItem item) {
+    if (item.mediaType == EditMediaType.image) {
+      return imageSoundSecondsPerSlide;
+    }
+    final d = item.duration ?? 0;
+    return d > 0 ? d : 1;
+  }
+
+  static int carouselItemDurationSecondsForMediaMeta(MediaMetaData media) {
+    return playbackDurationSecondsForCarouselMedia(
+      mediaType: media.mediaType,
+      durationSeconds: media.durationSeconds,
+    );
+  }
+
+  /// Sound track offset (seconds) at the start of carousel page [pageIndex].
+  static int carouselSoundStartOffsetSeconds<T>(
+    List<T> items,
+    int pageIndex,
+    int Function(T item) durationSecondsFor,
+  ) {
+    var seconds = 0;
+    for (var i = 0; i < pageIndex && i < items.length; i++) {
+      seconds += durationSecondsFor(items[i]);
+    }
+    return seconds;
+  }
+
+  static int carouselSoundStartOffsetSecondsForEditItems(
+    List<MediaEditItem> items,
+    int pageIndex,
+  ) =>
+      carouselSoundStartOffsetSeconds(
+        items,
+        pageIndex,
+        carouselItemDurationSecondsForEditItem,
+      );
+
+  static int carouselSoundStartOffsetSecondsForMediaMeta(
+    List<MediaMetaData> items,
+    int pageIndex,
+  ) =>
+      carouselSoundStartOffsetSeconds(
+        items,
+        pageIndex,
+        carouselItemDurationSecondsForMediaMeta,
+      );
+
+  static int carouselPostSoundDurationSecondsFromMedia(List<MediaData> media) {
+    var total = 0;
+    for (final m in media) {
+      if (_isVideoMedia(m)) {
+        final sec = m.duration?.toInt() ?? 0;
+        total += sec > 0 ? sec : 1;
+      } else {
+        total += imageSoundSecondsPerSlide;
+      }
+    }
+    return total > 0 ? total : imageSoundSecondsPerSlide;
+  }
+
+  static int carouselPostSoundDurationSecondsFromEditItems(
+    List<MediaEditItem> items,
+  ) {
+    if (items.isEmpty) return imageSoundSecondsPerSlide;
+    var total = 0;
+    for (final item in items) {
+      total += carouselItemDurationSecondsForEditItem(item);
+    }
+    return total;
+  }
+
+  /// Post-level soundtrack overlay (no per-video mux) for multi-slide carousels.
+  static bool useCarouselPostSoundOverlayForEditItems(List<MediaEditItem> items) =>
+      items.length > 1;
+
+  static bool useCarouselPostSoundOverlayForPlayback(List<MediaMetaData> items) =>
+      items.length > 1;
+
+  /// First attached soundtrack on any carousel item (e.g. after sound on slide 1).
+  static MediaEditSoundItem? firstSoundOnEditItems(Iterable<MediaEditItem> items) {
+    for (final item in items) {
+      final sound = item.sound;
+      if (sound == null) continue;
+      final hasId = sound.soundId?.trim().isNotEmpty == true;
+      final hasUrl = sound.soundUrl?.trim().isNotEmpty == true;
+      if (hasId || hasUrl) return sound;
+    }
+    return null;
+  }
+
+  /// Applies [sound] to every slide when the post uses carousel-level audio.
+  static void applySoundToAllEditItems(
+    List<MediaEditItem> items,
+    MediaEditSoundItem sound,
+  ) {
+    for (var i = 0; i < items.length; i++) {
+      items[i] = items[i].copyWith(sound: sound);
+    }
+  }
+
   /// Library sounds from `/api/v1/sounds/*` — not temporary `dub_*` ids.
   static bool isLibrarySoundId(String? soundId) {
     final id = soundId?.trim() ?? '';
@@ -181,21 +308,14 @@ abstract final class PostSoundUtil {
   }) {
     if (sound == null || !isLibrarySoundId(sound.soundId)) return;
 
-    final hasVideo = media.any((m) => _isVideoMedia(m));
-    final isImageOnly = media.isNotEmpty && !hasVideo;
-    final imageCount = imageCountFromMediaData(media);
-    final videoDuration = media
-        .where(_isVideoMedia)
-        .map((m) => m.duration?.toInt())
-        .whereType<int>()
-        .firstOrNull;
-    final imageClipSec = imagePostSoundDurationSeconds(imageCount);
+    final totalCarouselSec = carouselPostSoundDurationSecondsFromMedia(media);
+    final clipCap = totalCarouselSec > 60 ? 60 : totalCarouselSec;
 
     body['sound_id'] = sound.soundId!.trim();
     body['sound_snapshot'] = buildSoundSnapshot(
       sound: sound,
-      videoDurationSeconds: isImageOnly ? imageClipSec : videoDuration,
-      maxClipSec: isImageOnly ? imageClipSec : 60,
+      videoDurationSeconds: totalCarouselSec,
+      maxClipSec: clipCap,
     );
   }
 

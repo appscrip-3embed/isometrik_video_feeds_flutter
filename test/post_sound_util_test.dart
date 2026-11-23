@@ -49,6 +49,85 @@ void main() {
     expect(PostSoundUtil.imagePostSoundDurationSeconds(4), 12);
   });
 
+  test('playbackDurationSecondsForCarouselMedia uses slide length for images', () {
+    expect(
+      PostSoundUtil.playbackDurationSecondsForCarouselMedia(
+        mediaType: 0,
+        durationSeconds: 10,
+      ),
+      PostSoundUtil.imageSoundSecondsPerSlide,
+    );
+    expect(
+      PostSoundUtil.playbackDurationSecondsForCarouselMedia(
+        mediaType: 1,
+        durationSeconds: 25,
+      ),
+      25,
+    );
+  });
+
+  test('carouselSoundStartOffsetSeconds sums prior slide durations', () {
+    final items = ['image', 'video', 'image'];
+    int durationFor(String label) {
+      if (label == 'image') return 10;
+      if (label == 'video') return 19;
+      return 1;
+    }
+
+    expect(
+      PostSoundUtil.carouselSoundStartOffsetSeconds(
+        items,
+        0,
+        durationFor,
+      ),
+      0,
+    );
+    expect(
+      PostSoundUtil.carouselSoundStartOffsetSeconds(
+        items,
+        1,
+        durationFor,
+      ),
+      10,
+    );
+    expect(
+      PostSoundUtil.carouselSoundStartOffsetSeconds(
+        items,
+        2,
+        durationFor,
+      ),
+      29,
+    );
+  });
+
+  test('imageSlideIndexAtCarouselPage counts only prior images', () {
+    final items = ['image', 'video', 'image', 'image'];
+    expect(
+      PostSoundUtil.imageSlideIndexAtCarouselPage(
+        items,
+        0,
+        (s) => s == 'image',
+      ),
+      0,
+    );
+    expect(
+      PostSoundUtil.imageSlideIndexAtCarouselPage(
+        items,
+        2,
+        (s) => s == 'image',
+      ),
+      1,
+    );
+    expect(
+      PostSoundUtil.imageSlideIndexAtCarouselPage(
+        items,
+        3,
+        (s) => s == 'image',
+      ),
+      2,
+    );
+  });
+
   test('buildSoundSnapshot uses shorter video when under 60s', () {
     final sound = MediaEditSoundItem(
       soundId: 'snd_test',

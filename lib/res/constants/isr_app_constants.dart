@@ -49,6 +49,8 @@ class IsrAppConstants {
   static int get imageMediaLimit => PostMediaLimits.imageMediaLimit;
   static int get videoMediaLimit => PostMediaLimits.videoMediaLimit;
   static int get totalMediaLimit => PostMediaLimits.totalMediaLimit;
+  /// Fallback when timeline items lack duration; prefer
+  /// [PostConfig.resolvedImagePostDurationSeconds] / [PostSoundUtil.imageSoundSecondsPerSlide].
   static const int defaultImagePostDurationSeconds = 10;
   static const int minImagePostDurationSeconds = 3;
   static const int maxImagePostDurationSeconds = 15;

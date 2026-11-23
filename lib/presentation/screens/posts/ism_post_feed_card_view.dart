@@ -1021,7 +1021,13 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
       await _pauseImageSound();
       return;
     }
-    if (_isCurrentMediaImage && (_reel.sound?.hasId ?? false)) {
+    final hasSound = _reel.sound?.hasId ?? false;
+    final carouselOverlay = PostSoundUtil.useCarouselPostSoundOverlayForPlayback(
+      _reel.mediaMetaDataList,
+    );
+    final onVideoSlide = !_isCurrentMediaImage;
+    if (hasSound &&
+        (_isCurrentMediaImage || (carouselOverlay && onVideoSlide))) {
       await _startImageSoundIfNeeded();
     } else {
       await _pauseImageSound();
@@ -1058,20 +1064,40 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
     }
   }
 
-  int _imageSoundSlideIndex() {
-    final list = _reel.mediaMetaDataList;
-    final current = _mediaPageIndex.value;
-    var imageIndex = 0;
-    for (var i = 0; i < current && i < list.length; i++) {
-      if (!_isVideoMedia(list[i])) {
-        imageIndex++;
-      }
+  bool get _feedCarouselPostSoundOverlay =>
+      (_reel.sound?.hasId ?? false) &&
+      PostSoundUtil.useCarouselPostSoundOverlayForPlayback(
+        _reel.mediaMetaDataList,
+      );
+
+  Future<void> _syncFeedCarouselPostSoundToVideoPosition(
+    Duration videoPosition,
+  ) async {
+    if (!_feedCarouselPostSoundOverlay || _isCurrentMediaImage) return;
+    final player = _imageSoundPlayer;
+    if (player == null) {
+      await _startImageSoundIfNeeded();
+      return;
     }
-    return imageIndex;
+    final startSec = PostSoundUtil.carouselSoundStartOffsetSecondsForMediaMeta(
+      _reel.mediaMetaDataList,
+      _mediaPageIndex.value,
+    );
+    final target = Duration(seconds: startSec) + videoPosition;
+    try {
+      if (player.state != PlayerState.playing) {
+        await _startImageSoundIfNeeded();
+      }
+      await player.seek(target);
+    } catch (_) {}
   }
 
   Future<void> _startImageSoundIfNeeded() async {
-    if (!mounted || !_isCurrentMediaImage || !_mayPlayFeedMedia()) return;
+    if (!mounted || !_mayPlayFeedMedia()) return;
+    final carouselOverlay = PostSoundUtil.useCarouselPostSoundOverlayForPlayback(
+      _reel.mediaMetaDataList,
+    );
+    if (!_isCurrentMediaImage && !carouselOverlay) return;
     if (_shouldShowPaidLockOverlay) return;
     final sound = _reel.sound;
     if (sound == null || !sound.hasId) return;
@@ -1093,11 +1119,12 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
     final player = _imageSoundPlayer ??= AudioPlayer();
     IsrImageSoundRegistry.register(player);
     try {
-      final slideIndex = _imageSoundSlideIndex();
-      final startOffset = Duration(
-        seconds: slideIndex * PostSoundUtil.imageSoundSecondsPerSlide,
+      final startSec = PostSoundUtil.carouselSoundStartOffsetSecondsForMediaMeta(
+        _reel.mediaMetaDataList,
+        _mediaPageIndex.value,
       );
-      final clipKey = '$url#$slideIndex';
+      final startOffset = Duration(seconds: startSec);
+      final clipKey = '$url#$startSec';
       if (_imageSoundLoadedUrl != clipKey) {
         await player.setReleaseMode(ReleaseMode.stop);
         await player.setSource(audioSourceFromUrlOrPath(url));
@@ -1864,8 +1891,15 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
               mediaUrl: media.mediaUrl,
               thumbnailUrl: media.thumbnailUrl,
               videoCacheManager: _videoCacheManager,
-              isMuted: VideoMuteController.isMuted,
+              isMuted: VideoMuteController.isMuted || _feedCarouselPostSoundOverlay,
               aspectRatio: _fixedCardMediaAspectRatio(),
+              videoProgressCallBack: (totalDuration, currentPosition) {
+                if (_mediaPageIndex.value == index) {
+                  unawaited(_syncFeedCarouselPostSoundToVideoPosition(
+                    currentPosition,
+                  ));
+                }
+              },
               videoFitOverride: BoxFit.cover,
               logIndex: '${widget.logIndex}-$index',
               visibilityManagedByParent: true,

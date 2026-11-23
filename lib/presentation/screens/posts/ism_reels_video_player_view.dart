@@ -361,7 +361,12 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   int get _postTotalDurationSeconds => _reelData.mediaMetaDataList.isEmpty
       ? 0
       : _reelData.mediaMetaDataList
-          .map((e) => e.durationSeconds)
+          .map(
+            (e) => PostSoundUtil.playbackDurationSecondsForCarouselMedia(
+              mediaType: e.mediaType,
+              durationSeconds: e.durationSeconds,
+            ),
+          )
           .reduce((a, b) => a + b);
   Duration _postWatchDuration = Duration.zero;
   final ValueNotifier<double> _postProgress = ValueNotifier<double>(0.0);
@@ -808,11 +813,43 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       await _stopImageSound();
       return;
     }
-    if (_isCurrentMediaImage && (_reelData.sound?.hasId ?? false)) {
+    final hasSound = _reelData.sound?.hasId ?? false;
+    final carouselOverlay = PostSoundUtil.useCarouselPostSoundOverlayForPlayback(
+      _reelData.mediaMetaDataList,
+    );
+    if (hasSound &&
+        (_isCurrentMediaImage ||
+            (carouselOverlay && !_isCurrentMediaImage))) {
       await _startImageSoundIfNeeded();
     } else {
       await _pauseImageSound();
     }
+  }
+
+  bool get _usesCarouselPostSoundOverlay =>
+      (_reelData.sound?.hasId ?? false) &&
+      PostSoundUtil.useCarouselPostSoundOverlayForPlayback(
+        _reelData.mediaMetaDataList,
+      );
+
+  Future<void> _syncCarouselPostSoundToVideoPosition(Duration videoPosition) async {
+    if (!_usesCarouselPostSoundOverlay || _isCurrentMediaImage) return;
+    final player = _imageSoundPlayer;
+    if (player == null) {
+      await _startImageSoundIfNeeded();
+      return;
+    }
+    final startSec = PostSoundUtil.carouselSoundStartOffsetSecondsForMediaMeta(
+      _reelData.mediaMetaDataList,
+      _currentPageNotifier.value,
+    );
+    final target = Duration(seconds: startSec) + videoPosition;
+    try {
+      if (player.state != PlayerState.playing) {
+        await _startImageSoundIfNeeded();
+      }
+      await player.seek(target);
+    } catch (_) {}
   }
 
   void _syncPlaybackSession({
@@ -1228,7 +1265,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       mediaUrl: media.mediaUrl,
       thumbnailUrl: media.thumbnailUrl,
       videoCacheManager: _videoCacheManager,
-      isMuted: VideoMuteController.isMuted,
+      isMuted: VideoMuteController.isMuted || _usesCarouselPostSoundOverlay,
       onVisibilityChanged: (isVisible) {
         // Visibility is handled internally by VideoPlayerWidget
       },
@@ -1238,6 +1275,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
         final page = carouselPageIndex ?? _currentPageNotifier.value;
         if (page == _currentPageNotifier.value) {
           _syncPlaybackSession(positionOverride: currentPosition);
+          unawaited(_syncCarouselPostSoundToVideoPosition(currentPosition));
         }
         if (_currentMediaDuration.value != totalDuration) {
           _currentMediaDuration.value = totalDuration;
@@ -3515,7 +3553,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   Future<void> _startImageSoundIfNeeded() async {
     if (!mounted) return;
-    if (!_isCurrentMediaImage) return;
+    final carouselOverlay = _usesCarouselPostSoundOverlay;
+    if (!_isCurrentMediaImage && !carouselOverlay) return;
     if (_shouldShowPaidLockOverlay) return;
     if (_isImagePaused || _isPlaybackBlocked) return;
     if (!_isCurrentReel) return;
@@ -3554,10 +3593,18 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     IsrImageSoundRegistry.register(player);
     _bindImageSoundPosition(player);
     try {
-      if (_imageSoundLoadedUrl != url) {
-        await player.setReleaseMode(ReleaseMode.loop);
+      final startSec = PostSoundUtil.carouselSoundStartOffsetSecondsForMediaMeta(
+        _reelData.mediaMetaDataList,
+        _currentPageNotifier.value,
+      );
+      final startOffset = Duration(seconds: startSec);
+      final clipKey = '$url#$startSec';
+      if (_imageSoundLoadedUrl != clipKey) {
+        await player.setReleaseMode(ReleaseMode.stop);
         await player.setSource(audioSourceFromUrlOrPath(url));
-        _imageSoundLoadedUrl = url;
+        await player.seek(startOffset);
+        _imageSoundLoadedUrl = clipKey;
+        _lastImageSoundPosition = startOffset;
       }
       if (!mounted ||
           !_isCurrentReel ||
@@ -3636,7 +3683,11 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     for (var i = 0;
         i < currentPage && i < _reelData.mediaMetaDataList.length;
         i++) {
-      completedSeconds += _reelData.mediaMetaDataList[i].durationSeconds;
+      final media = _reelData.mediaMetaDataList[i];
+      completedSeconds += PostSoundUtil.playbackDurationSecondsForCarouselMedia(
+        mediaType: media.mediaType,
+        durationSeconds: media.durationSeconds,
+      );
     }
 
     _postWatchDuration =
@@ -3666,10 +3717,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     final shouldAutoMove =
         widget.reelsConfig.autoMoveNextMedia || widget.onVideoCompleted != null;
     final imageTotalDuration = Duration(
-        seconds: _reelData
-            .mediaMetaDataList[_currentPageNotifier.value].durationSeconds
-            .clamp(IsrAppConstants.minImagePostDurationSeconds,
-                IsrAppConstants.maxImagePostDurationSeconds));
+      seconds: PostSoundUtil.imageSoundSecondsPerSlide,
+    );
 
     _imageViewTimer?.cancel();
     _isImagePaused = false;

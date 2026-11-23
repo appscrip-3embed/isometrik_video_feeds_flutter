@@ -1304,7 +1304,7 @@ List<MediaMetaData> reelMediaMetaDataFromTimeline(TimeLineData postData) {
         mediaUrl: url,
         thumbnailUrl: url,
         mediaType: isImage ? 0 : 1,
-        durationSeconds: IsrAppConstants.defaultImagePostDurationSeconds,
+        durationSeconds: PostSoundUtil.imageSoundSecondsPerSlide,
       );
     }).toList();
   }
@@ -1399,7 +1399,7 @@ MediaMetaData _getMediaMetaData(MediaData mediaData) {
       mediaType: 0,
       mediaUrl: mediaData.previewUrl ?? '',
       thumbnailUrl: mediaData.previewUrl ?? '',
-      durationSeconds: IsrAppConstants.defaultImagePostDurationSeconds,
+      durationSeconds: PostSoundUtil.imageSoundSecondsPerSlide,
     );
   }
 
@@ -1408,9 +1408,9 @@ MediaMetaData _getMediaMetaData(MediaData mediaData) {
     mediaUrl: mediaData.url ?? '',
     thumbnailUrl: mediaData.previewUrl ?? '',
     durationSeconds: (mediaData.mediaType == 'image'
-            ? IsrAppConstants.defaultImagePostDurationSeconds
+            ? PostSoundUtil.imageSoundSecondsPerSlide
             : mediaData.duration?.toInt()) ??
-        IsrAppConstants.defaultImagePostDurationSeconds,
+        PostSoundUtil.imageSoundSecondsPerSlide,
   );
 }
 

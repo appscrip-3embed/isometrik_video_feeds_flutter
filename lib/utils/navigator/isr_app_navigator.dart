@@ -489,7 +489,9 @@ class IsrAppNavigator {
           ? (editMedia) => CreatePostFlowCoordinator.addMoreMedia(
                 context,
                 editMedia: editMedia,
-                selectedSound: initialSound,
+                selectedSound:
+                    CreatePostFlowCoordinator.soundFromEditItems(editMedia) ??
+                        initialSound,
               )
           : (_) async => null,
       pickCoverPic: () => CreatePostFlowCoordinator.pickCoverPic(context),
