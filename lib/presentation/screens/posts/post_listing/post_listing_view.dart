@@ -1105,17 +1105,31 @@ class _PostListingViewState extends State<PostListingView> {
         },
       );
 
+  /// Reuses the same conversion pattern as [SearchLocationScreen] (per-item try/catch,
+  /// skip malformed rows) instead of casting inside [ListView.builder].
+  List<UnifiedLocationItem> _unifiedPlaceResults(List<dynamic> places) {
+    final unifiedItems = <UnifiedLocationItem>[];
+    for (final item in places) {
+      if (item is! Result) continue;
+      try {
+        final row = UnifiedLocationItem.fromLocationResult(item);
+        if (row.placeId.isEmpty && row.title.trim().isEmpty) continue;
+        unifiedItems.add(row);
+      } catch (e) {
+        debugPrint('Skipping malformed place search result: $e');
+      }
+    }
+    return unifiedItems;
+  }
+
   Widget _buildPlacesListWithoutController(
     List<dynamic> places,
-  ) =>
-      ListView.builder(
+  ) {
+    final resultList = _unifiedPlaceResults(places);
+    return ListView.builder(
         physics: const BouncingScrollPhysics(),
-        itemCount: places.length,
+        itemCount: resultList.length,
         itemBuilder: (context, index) {
-          final resultList = (places as List<Result>)
-              .map(UnifiedLocationItem.fromLocationResult)
-              .toList();
-
           final result = resultList[index];
           final placeName = result.title;
           return Container(
@@ -1195,6 +1209,7 @@ class _PostListingViewState extends State<PostListingView> {
           );
         },
       );
+  }
 
   Widget _buildAccountsListWithoutController(
     List<dynamic> accounts,

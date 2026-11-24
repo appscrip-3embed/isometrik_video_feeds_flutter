@@ -471,7 +471,7 @@ class _CreateTextPostViewState extends State<CreateTextPostView> {
                   behavior: HitTestBehavior.translucent,
                   child: SingleChildScrollView(
                     keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
+                        ScrollViewKeyboardDismissBehavior.manual,
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
