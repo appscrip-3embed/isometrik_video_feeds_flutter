@@ -443,6 +443,8 @@ class IsrTranslationFile {
   static String get createdSuccessfully => isrTr('createdSuccessfully');
   static String get updatedSuccessfully => isrTr('updatedSuccessfully');
   static String get savingPost => isrTr('savingPost');
+  static String get savePostToAddToCollections =>
+      isrTr('savePostToAddToCollections');
   static String get newCollection => isrTr('newCollection');
   static String get yourSavedProducts => isrTr('yourSavedProducts');
   static String get done => isrTr('done');

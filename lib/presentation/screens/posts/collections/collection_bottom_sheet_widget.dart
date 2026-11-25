@@ -47,6 +47,10 @@ class _CollectionBottomSheetWidgetState
   late final ValueNotifier<bool> btnEnableNotifier;
   late final ValueNotifier<int> totalPostNotifier;
   late final ValueNotifier<int> totalProductNotifier;
+  /// Mirrors bookmark state; collections are editable only when true.
+  late final ValueNotifier<bool> postSavedNotifier;
+  /// True while save/unsave API is running (incl. auto-save on sheet open).
+  late final ValueNotifier<bool> savePendingNotifier;
 
   Set<String> _initialSelectedCollectionIds = {};
   bool _initialSelectionSynced = false;
@@ -67,6 +71,8 @@ class _CollectionBottomSheetWidgetState
     btnEnableNotifier = ValueNotifier<bool>(false);
     totalPostNotifier = ValueNotifier<int>(0);
     totalProductNotifier = ValueNotifier<int>(0);
+    postSavedNotifier = ValueNotifier<bool>(widget.isSaved);
+    savePendingNotifier = ValueNotifier<bool>(!widget.isSaved);
     _scrollController = ScrollController();
 
     _collectionBloc = IsmInjectionUtils.getBloc<CollectionBloc>()
@@ -79,8 +85,32 @@ class _CollectionBottomSheetWidgetState
     _collectionBloc.add(GetSavedPostEvent(limit: 10, skip: 1));
   }
 
+  bool get _canPickCollections =>
+      postSavedNotifier.value && !savePendingNotifier.value;
+
+  void _applyBookmarkState({
+    required bool saved,
+    bool savePending = false,
+  }) {
+    isSaved = saved;
+    postSavedNotifier.value = saved;
+    savePendingNotifier.value = savePending;
+    if (!saved) {
+      selectedCollectionNotifier.value =
+          Set<String>.from(_initialSelectedCollectionIds);
+      _updateDoneButtonState();
+    }
+  }
+
   void selectCollection(String id) {
-    if (id.isEmpty) return;
+    if (id.isEmpty || !_canPickCollections) {
+      if (!_canPickCollections && id.isNotEmpty) {
+        Utility.showToastMessage(
+          IsrTranslationFile.savePostToAddToCollections,
+        );
+      }
+      return;
+    }
 
     final updated = Set<String>.from(selectedCollectionNotifier.value);
     if (updated.contains(id)) {
@@ -103,6 +133,8 @@ class _CollectionBottomSheetWidgetState
   void dispose() {
     totalPostNotifier.dispose();
     totalProductNotifier.dispose();
+    postSavedNotifier.dispose();
+    savePendingNotifier.dispose();
     selectedCollectionNotifier.dispose();
     btnEnableNotifier.dispose();
     _scrollController.dispose();
@@ -119,6 +151,11 @@ class _CollectionBottomSheetWidgetState
         _initialSelectedCollectionIds.difference(currentSelection).toList();
 
     if (collectionIdsToAdd.isEmpty && removeCollectionIds.isEmpty) return;
+
+    if (!_canPickCollections) {
+      Utility.showToastMessage(IsrTranslationFile.savePostToAddToCollections);
+      return;
+    }
 
     _collectionBloc.add(MoveToCollectionEvent(
       postId: widget.postId,
@@ -143,7 +180,26 @@ class _CollectionBottomSheetWidgetState
         },
         child: BlocListener<CollectionBloc, CollectionState>(
           bloc: _collectionBloc,
+          listenWhen: (previous, current) =>
+              current is ModifyUserCollectionSuccessState ||
+              current is MoveToCollectionErrorState ||
+              current is ModifyUserCollectionErrorState ||
+              current is UserCollectionErrorState ||
+              current is SavePostLoadingState ||
+              current is SavePostSuccessState ||
+              current is SavePostErrorState,
           listener: (context, state) {
+            if (state is SavePostLoadingState &&
+                state.postId == widget.postId) {
+              savePendingNotifier.value = true;
+            } else if (state is SavePostSuccessState &&
+                state.postId == widget.postId) {
+              _applyBookmarkState(
+                saved: state.socialPostAction == SocialPostAction.save,
+              );
+            } else if (state is SavePostErrorState) {
+              savePendingNotifier.value = false;
+            }
             if (state is ModifyUserCollectionSuccessState) {
               context.pop(isSaved);
               final names = state.collectionNames;
@@ -205,8 +261,20 @@ class _CollectionBottomSheetWidgetState
                         color: CollectionThemeResolver.textPrimary,
                       ),
                     ),
-                    CustomTextButtonWidget(
+                    ValueListenableBuilder<bool>(
+                      valueListenable: postSavedNotifier,
+                      builder: (context, postSaved, _) =>
+                          ValueListenableBuilder<bool>(
+                        valueListenable: savePendingNotifier,
+                        builder: (context, savePending, __) =>
+                            CustomTextButtonWidget(
                       onPress: () async {
+                        if (!postSaved || savePending) {
+                          Utility.showToastMessage(
+                            IsrTranslationFile.savePostToAddToCollections,
+                          );
+                          return;
+                        }
                         await Utility.showCustomizedBottomSheet(
                           isRoundedCorners: false,
                           isScrollControlled: true,
@@ -234,7 +302,29 @@ class _CollectionBottomSheetWidgetState
                         ),
                       ),
                     ),
+                      ),
+                    ),
                   ],
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: postSavedNotifier,
+                  builder: (context, postSaved, _) =>
+                      ValueListenableBuilder<bool>(
+                    valueListenable: savePendingNotifier,
+                    builder: (context, savePending, __) {
+                      final canPick = postSaved && !savePending;
+                      if (canPick) return const SizedBox.shrink();
+                      return Padding(
+                        padding: IsrDimens.edgeInsets(bottom: IsrDimens.six),
+                        child: Text(
+                          IsrTranslationFile.savePostToAddToCollections,
+                          style: IsrStyles.primaryText12.copyWith(
+                            color: CollectionThemeResolver.textSecondary,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
                 IsrDimens.boxHeight(IsrDimens.six),
                 Expanded(
@@ -285,19 +375,33 @@ class _CollectionBottomSheetWidgetState
                           _updateDoneButtonState();
                         }
 
-                        return ValueListenableBuilder<Set<String>>(
-                          valueListenable: selectedCollectionNotifier,
-                          builder: (context, selectedCollectionIds, child) =>
-                              ListView.builder(
-                            controller: _scrollController,
-                            itemCount: state.collectionList.length,
-                            itemBuilder: (context, index) {
-                              final fallback = state.collectionList[index];
-                              final id = fallback.id ?? '';
-                              final collection = _collectionMap[id] ?? fallback;
-                              return _buildCollectionTile(
-                                collection,
-                                selectedCollectionIds,
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: postSavedNotifier,
+                          builder: (context, postSaved, _) =>
+                              ValueListenableBuilder<bool>(
+                            valueListenable: savePendingNotifier,
+                            builder: (context, savePending, __) {
+                              final canPick = postSaved && !savePending;
+                              return ValueListenableBuilder<Set<String>>(
+                                valueListenable: selectedCollectionNotifier,
+                                builder: (context, selectedCollectionIds,
+                                        child) =>
+                                    ListView.builder(
+                                  controller: _scrollController,
+                                  itemCount: state.collectionList.length,
+                                  itemBuilder: (context, index) {
+                                    final fallback =
+                                        state.collectionList[index];
+                                    final id = fallback.id ?? '';
+                                    final collection =
+                                        _collectionMap[id] ?? fallback;
+                                    return _buildCollectionTile(
+                                      collection,
+                                      selectedCollectionIds,
+                                      collectionsEnabled: canPick,
+                                    );
+                                  },
+                                ),
                               );
                             },
                           ),
@@ -321,18 +425,30 @@ class _CollectionBottomSheetWidgetState
                 ValueListenableBuilder<bool>(
                   valueListenable: btnEnableNotifier,
                   builder: (context, isEnable, _) =>
-                      BlocBuilder<CollectionBloc, CollectionState>(
-                    bloc: _collectionBloc,
-                    buildWhen: (previous, current) =>
-                        current is ModifyUserCollectionLoadingState ||
-                        current is ModifyUserCollectionSuccessState ||
-                        current is ModifyUserCollectionErrorState,
-                    builder: (context, state) => AppButton(
-                      borderRadius: 8.responsiveDimension,
-                      title: IsrTranslationFile.done,
-                      onPress: _handleDonePress,
-                      isDisable: !isEnable,
-                      isLoading: state is ModifyUserCollectionLoadingState,
+                      ValueListenableBuilder<bool>(
+                    valueListenable: postSavedNotifier,
+                    builder: (context, postSaved, _) =>
+                        ValueListenableBuilder<bool>(
+                      valueListenable: savePendingNotifier,
+                      builder: (context, savePending, __) =>
+                          BlocBuilder<CollectionBloc, CollectionState>(
+                        bloc: _collectionBloc,
+                        buildWhen: (previous, current) =>
+                            current is ModifyUserCollectionLoadingState ||
+                            current is ModifyUserCollectionSuccessState ||
+                            current is ModifyUserCollectionErrorState ||
+                            current is MoveToCollectionLoadingState,
+                        builder: (context, state) => AppButton(
+                          borderRadius: 8.responsiveDimension,
+                          title: IsrTranslationFile.done,
+                          onPress: _handleDonePress,
+                          isDisable:
+                              !isEnable || !postSaved || savePending,
+                          isLoading:
+                              state is ModifyUserCollectionLoadingState ||
+                                  state is MoveToCollectionLoadingState,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -344,8 +460,9 @@ class _CollectionBottomSheetWidgetState
 
   Widget _buildCollectionTile(
     CollectionData collection,
-    Set<String> selectedCollectionIds,
-  ) {
+    Set<String> selectedCollectionIds, {
+    bool collectionsEnabled = true,
+  }) {
     final collectionId = collection.id ?? '';
 
     // Skip rendering if collection has no valid ID
@@ -368,11 +485,13 @@ class _CollectionBottomSheetWidgetState
         checkboxShape: RoundedRectangleBorder(
           borderRadius: IsrDimens.borderRadiusAll(IsrDimens.four),
         ),
-        onChanged: (value) {
-          debugPrint(
-              'CheckboxListTile tapped! collectionId: "$collectionId", value: $value');
-          selectCollection(collectionId);
-        },
+        onChanged: collectionsEnabled
+            ? (value) {
+                debugPrint(
+                    'CheckboxListTile tapped! collectionId: "$collectionId", value: $value');
+                selectCollection(collectionId);
+              }
+            : null,
         fillColor: WidgetStateProperty.resolveWith<Color>(
           (Set<WidgetState> states) => states.contains(WidgetState.selected)
               ? Theme.of(context).primaryColor
@@ -664,7 +783,10 @@ class _CollectionBottomSheetWidgetState
                   } else {
                     if (state is SavePostSuccessState &&
                         state.postId == widget.postId) {
-                      isSaved = state.socialPostAction == SocialPostAction.save;
+                      _applyBookmarkState(
+                        saved:
+                            state.socialPostAction == SocialPostAction.save,
+                      );
                     }
                     iconContent = AppImage.svg(
                       height: 24.responsiveDimension,

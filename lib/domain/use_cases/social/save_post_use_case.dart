@@ -18,10 +18,12 @@ class SavePostUseCase extends BaseUseCase {
           postId: postId,
           socialPostAction: socialPostAction,
         );
+        final statusCode = response.responseCode;
+        final ok = statusCode == 200 || statusCode == 201;
         return ApiResult(
-            data: response.responseCode == 200 || response.responseCode == 201
-                ? response.data
-                : null);
+          data: ok ? response.data : null,
+          statusCode: statusCode,
+        );
       });
 
   Future<ApiResult<TimelineResponse?>> executeGetProfileSavedPostData({

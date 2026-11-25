@@ -357,6 +357,8 @@ const Map<String, String> kIsrTrFallback = {
   'createdSuccessfully': 'created successfully',
   'updatedSuccessfully': 'updated successfully',
   'savingPost': 'Saving Post',
+  'savePostToAddToCollections':
+      'Save this post to add or change collections',
   'newCollection': 'New Collection',
   'yourSavedProducts': 'Your Saved Products',
   'done': 'Done',

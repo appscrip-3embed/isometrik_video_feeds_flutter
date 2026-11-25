@@ -55,10 +55,12 @@ class CollectionUseCase extends BaseUseCase {
           collectionId: collectionId,
           removeCollectionIds: removeCollectionIds,
         );
+        final statusCode = response.responseCode;
+        final ok = statusCode == 200 || statusCode == 201;
         return ApiResult(
-            data: response.responseCode == 200 || response.responseCode == 201
-                ? response.data
-                : null);
+          data: ok ? response.data : null,
+          statusCode: statusCode,
+        );
       });
 
   /// Create or update collection

@@ -53,6 +53,9 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
 
   String? uploadedImageUrl;
 
+  /// Coalesces concurrent save requests for the same post (sheet auto-save + Done).
+  final Map<String, Future<ApiResult<ResponseClass?>>> _inFlightSavePosts = {};
+
   ///Get user collection list
   Future<void> getUserCollection(
       GetUserCollectionEvent event, Emitter<CollectionState> emit) async {
@@ -307,6 +310,26 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
     return result;
   }
 
+  /// Saves [postId] once; overlapping callers await the same in-flight request.
+  Future<ApiResult<ResponseClass?>> _coalescedSavePost(String postId) async {
+    final inFlight = _inFlightSavePosts[postId];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = getSavedPostDataUseCase.executeSavePost(
+      isLoading: false,
+      postId: postId,
+      socialPostAction: SocialPostAction.save,
+    );
+    _inFlightSavePosts[postId] = future;
+    try {
+      return await future;
+    } finally {
+      _inFlightSavePosts.remove(postId);
+    }
+  }
+
   FutureOr<void> _savePostAction(
       SavePostActionEvent event, Emitter<CollectionState> emit) async {
     emit(SavePostLoadingState(postId: event.postId));
@@ -314,13 +337,14 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
     if (!isLoggedIn) {
       return;
     }
-    final apiResult = await getSavedPostDataUseCase.executeSavePost(
-      isLoading: false,
-      postId: event.postId,
-      socialPostAction:
-          event.isSaved ? SocialPostAction.unSave : SocialPostAction.save,
-    );
-    if (apiResult.isSuccess) {
+    final apiResult = event.isSaved
+        ? await getSavedPostDataUseCase.executeSavePost(
+            isLoading: false,
+            postId: event.postId,
+            socialPostAction: SocialPostAction.unSave,
+          )
+        : await _coalescedSavePost(event.postId);
+    if (savePostApiSucceeded(apiResult)) {
       emit(SavePostSuccessState(
           postId: event.postId,
           socialPostAction:
@@ -420,23 +444,61 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       return;
     }
 
-    final apiResult = await _userCollectionsUseCase.executeMoveToCollection(
-      isLoading: true,
-      postId: event.postId,
-      collectionId: event.collectionId,
-      removeCollectionIds: event.removeCollectionIds,
-    );
-    if (apiResult.isSuccess) {
-      event.onMoveToCollection?.call();
-      add(GetUserCollectionEvent(
-        skip: 1,
-        limit: 10,
+    emit(MoveToCollectionLoadingState());
+
+    // Backend requires the post in "saved" before move_to_collection; the sheet
+    // auto-saves on open but Done / new collection can fire before that finishes.
+    if (event.collectionId.isNotEmpty) {
+      final isLoggedIn = await isUserLoggedIn();
+      if (!isLoggedIn) {
+        return;
+      }
+      final saveResult = await _coalescedSavePost(event.postId);
+      if (!savePostApiSucceeded(saveResult)) {
+        emit(MoveToCollectionErrorState(
+          error: readableCollectionApiError(saveResult.error?.message),
+        ));
+        return;
+      }
+    }
+
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+        if (event.collectionId.isNotEmpty) {
+          await getSavedPostDataUseCase.executeSavePost(
+            isLoading: false,
+            postId: event.postId,
+            socialPostAction: SocialPostAction.save,
+          );
+        }
+      }
+
+      final apiResult = await _userCollectionsUseCase.executeMoveToCollection(
+        isLoading: attempt == 0,
         postId: event.postId,
-      ));
-    } else {
-      emit(MoveToCollectionErrorState(
-        error: readableCollectionApiError(apiResult.error?.message),
-      ));
+        collectionId: event.collectionId,
+        removeCollectionIds: event.removeCollectionIds,
+      );
+      if (apiResult.isSuccess) {
+        event.onMoveToCollection?.call();
+        add(GetUserCollectionEvent(
+          skip: 1,
+          limit: 10,
+          postId: event.postId,
+        ));
+        return;
+      }
+
+      final shouldRetry =
+          event.collectionId.isNotEmpty && attempt < maxAttempts - 1;
+      if (!shouldRetry) {
+        emit(MoveToCollectionErrorState(
+          error: readableCollectionApiError(apiResult.error?.message),
+        ));
+        return;
+      }
     }
   }
 
@@ -509,6 +571,18 @@ class CollectionBloc extends Bloc<CollectionEvent, CollectionState> {
       ));
     }
   }
+}
+
+/// Save can return HTTP 200 with an empty body; [ApiResult.isSuccess] alone is not enough.
+bool savePostApiSucceeded(ApiResult<ResponseClass?> result) {
+  final code = result.statusCode;
+  if (code == 200 || code == 201) return true;
+  return result.isSuccess;
+}
+
+bool isSavedPostNotFoundError(String? raw) {
+  final message = (raw ?? '').toLowerCase();
+  return message.contains('saved_post_not_found') || message.contains('4003');
 }
 
 /// Turns API error payloads into text a user can read.
