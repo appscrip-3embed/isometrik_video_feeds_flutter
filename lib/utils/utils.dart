@@ -28,6 +28,7 @@ export 'post_review_status_util.dart';
 export 'post_sound_util.dart';
 export 'rectangular_progress_bar.dart';
 export 'reel_download_util.dart';
+export 'reels_feed_scroll_physics.dart';
 export 'reel_dub_audio_util.dart';
 export 'rejected_post_resubmit_service.dart';
 export 'sound_library_feature_util.dart';

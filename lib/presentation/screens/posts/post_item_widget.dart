@@ -9,6 +9,7 @@ import 'package:ism_video_reel_player/presentation/presentation.dart';
 import 'package:ism_video_reel_player/utils/isr_active_video_player_registry.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:preload_page_view/preload_page_view.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 class PostItemWidget extends StatefulWidget {
   const PostItemWidget({
@@ -72,9 +73,6 @@ class PostItemWidget extends StatefulWidget {
 
 class _PostItemWidgetState extends State<PostItemWidget>
     with AutomaticKeepAliveClientMixin {
-  /// [PreloadPageView] applies snap paging when [pageSnapping] is true.
-  static const ScrollPhysics _reelsFeedPagePhysics = ClampingScrollPhysics();
-
   late PreloadPageController _pageController;
   final Set<String> _cachedImages = {};
   late final VideoCacheManager _videoCacheManager;
@@ -91,6 +89,10 @@ class _PostItemWidgetState extends State<PostItemWidget>
   var _reelsLoadMoreInFlight = false;
   /// Prevents double auto-advance when the same post fires completion twice.
   var _videoCompletionInFlight = false;
+
+  /// Warms the next reel's thumbnails while the user is mid-swipe.
+  Timer? _scrollAheadDebounce;
+  int? _scrollAheadPrecacheIndex;
 
   // Track refresh count for each index to force rebuild
   final Map<int, int> _refreshCounts = {};
@@ -157,6 +159,36 @@ class _PostItemWidgetState extends State<PostItemWidget>
     if (!_isInitialized) {
       _isInitialized = true;
     }
+  }
+
+  bool _handleReelsFeedScrollNotification(ScrollNotification notification) {
+    if (_isPostFeedLayout) return false;
+    if (notification.metrics.axis != Axis.vertical) return false;
+
+    if (notification is ScrollUpdateNotification ||
+        notification is ScrollEndNotification) {
+      _scheduleScrollAheadPrecache();
+    }
+    if (notification is ScrollEndNotification) {
+      VisibilityDetectorController.instance.notifyNow();
+    }
+    return false;
+  }
+
+  void _scheduleScrollAheadPrecache() {
+    if (!_pageController.hasClients || _reelsDataList.isEmpty) return;
+    _scrollAheadDebounce?.cancel();
+    _scrollAheadDebounce = Timer(const Duration(milliseconds: 48), () {
+      if (!mounted || !_pageController.hasClients) return;
+      final page = _pageController.page;
+      if (page == null) return;
+      final dragTarget = page.round();
+      final ahead = dragTarget + (page > dragTarget ? 1 : -1);
+      if (ahead < 0 || ahead >= _reelsDataList.length) return;
+      if (_scrollAheadPrecacheIndex == ahead) return;
+      _scrollAheadPrecacheIndex = ahead;
+      unawaited(_doMediaCaching(ahead));
+    });
   }
 
   @override
@@ -327,6 +359,7 @@ class _PostItemWidgetState extends State<PostItemWidget>
 
   @override
   void dispose() {
+    _scrollAheadDebounce?.cancel();
     final section = widget.postSectionType;
     if (section != null) {
       IsrVideoReelConfig.unregisterSectionForegroundResume(section);
@@ -664,109 +697,111 @@ class _PostItemWidgetState extends State<PostItemWidget>
               child: ValueListenableBuilder<bool>(
                 valueListenable: IsrVideoReelConfig.reelsFeedScrollLocked,
                 builder: (context, scrollLocked, _) {
-                  // Current page only — adjacent pages still cost thumb decode
-                  // and briefly race visibility init during swipe.
-                  const preloadCount = 0;
-                  return PreloadPageView.builder(
-                preloadPagesCount: preloadCount,
-                // key: _pageStorageKey,
-                // allowImplicitScrolling: widget.allowImplicitScrolling ?? true,
-                controller: _pageController,
-                pageSnapping: true,
-                physics: scrollLocked
-                    ? const NeverScrollableScrollPhysics()
-                    : _reelsFeedPagePhysics,
-                onPageChanged: (index) {
-                  _currentIndex.value = index;
-                  // Drop adjacent warm/preloaded decoders as soon as page settles.
-                  IsrActiveVideoPlayerRegistry.releasePreloadedMemory();
-                  _schedulePlaybackResumeForCurrentPage();
-                  _doMediaCaching(index);
-                  final post = _reelsDataList[index];
-
-                  // EventQueueProvider.instance.addEvent({
-                  //   'type': EventType.view.value,
-                  //   'postId': post.postId,
-                  //   'userId': widget.loggedInUserId,
-                  //   'timestamp': DateTime.now().toUtc().toIso8601String(),
-                  // });
-                  // Check if we're at 65% of the list
-                  final threshold = (_reelsDataList.length * 0.65).floor();
-                  if (index >= threshold ||
-                      index == _reelsDataList.length - 1) {
-                    _requestReelsLoadMore();
-                  }
-                  if (widget.reelsConfig.onReelsChange != null) {
-                    widget.reelsConfig.onReelsChange?.call(post, index);
-                  }
-                },
-                itemCount: _reelsDataList.length,
-                scrollDirection: Axis.vertical,
-                itemBuilder: (context, index) {
-                  final reelsData = _reelsDataList[index];
-                  return RepaintBoundary(
-                    child: IsmReelsVideoPlayerView(
-                      index: index,
-                      playbackSession: index == (widget.startingPostIndex ?? 0)
-                          ? widget.playbackSession
-                          : null,
-                      currentIndex: _currentIndex,
-                      lifecycleResumeTick: _lifecycleResumeTick,
-                      reelsData: reelsData,
-                      postSectionType:
-                          widget.postSectionType ?? PostSectionType.following,
-                      loggedInUserId: widget.loggedInUserId,
-                      videoCacheManager: _videoCacheManager,
-                      // Add refresh count to force rebuild
-                      key: ValueKey(
-                          '${reelsData.postId}_${_refreshCounts[index] ?? 0}'),
-                      onVideoCompleted: (widget.reelsConfig.postConfig.autoMoveToNextPost)
-                          ? () => _handleVideoCompletion(index)
-                          : null,
-                      reelsConfig: widget.reelsConfig,
-                      onPressMoreButton: () async {
-                        if (widget.reelsConfig.onPressMoreButton == null) {
-                          return;
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: _handleReelsFeedScrollNotification,
+                    child: PreloadPageView.builder(
+                      preloadPagesCount: kReelsFeedPreloadPagesCount,
+                      controller: _pageController,
+                      pageSnapping: true,
+                      physics: scrollLocked
+                          ? const NeverScrollableScrollPhysics()
+                          : reelsFeedScrollPhysics(context),
+                      onPageChanged: (index) {
+                        _currentIndex.value = index;
+                        _scrollAheadPrecacheIndex = null;
+                        // Release preloaded decoders after the new page paints.
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          IsrActiveVideoPlayerRegistry.releasePreloadedMemory();
+                        });
+                        _schedulePlaybackResumeForCurrentPage();
+                        _doMediaCaching(index);
+                        final post = _reelsDataList[index];
+                        final threshold =
+                            (_reelsDataList.length * 0.65).floor();
+                        if (index >= threshold ||
+                            index == _reelsDataList.length - 1) {
+                          _requestReelsLoadMore();
                         }
-                        final savedIndex = _resolvedCurrentPageIndex;
-                        await widget.reelsConfig.onPressMoreButton!
-                            .call(reelsData);
-                        if (!mounted || !_pageController.hasClients) return;
-                        final target = savedIndex.clamp(
-                          0,
-                          _reelsDataList.length - 1,
+                        widget.reelsConfig.onReelsChange?.call(post, index);
+                      },
+                      itemCount: _reelsDataList.length,
+                      scrollDirection: Axis.vertical,
+                      itemBuilder: (context, index) {
+                        final reelsData = _reelsDataList[index];
+                        return RepaintBoundary(
+                          child: IsmReelsVideoPlayerView(
+                            index: index,
+                            playbackSession:
+                                index == (widget.startingPostIndex ?? 0)
+                                    ? widget.playbackSession
+                                    : null,
+                            currentIndex: _currentIndex,
+                            lifecycleResumeTick: _lifecycleResumeTick,
+                            reelsData: reelsData,
+                            postSectionType: widget.postSectionType ??
+                                PostSectionType.following,
+                            loggedInUserId: widget.loggedInUserId,
+                            videoCacheManager: _videoCacheManager,
+                            key: ValueKey(
+                              '${reelsData.postId}_${_refreshCounts[index] ?? 0}',
+                            ),
+                            onVideoCompleted: (widget.reelsConfig.postConfig
+                                    .autoMoveToNextPost)
+                                ? () => _handleVideoCompletion(index)
+                                : null,
+                            reelsConfig: widget.reelsConfig,
+                            onPressMoreButton: () async {
+                              if (widget.reelsConfig.onPressMoreButton ==
+                                  null) {
+                                return;
+                              }
+                              final savedIndex = _resolvedCurrentPageIndex;
+                              await widget.reelsConfig.onPressMoreButton!
+                                  .call(reelsData);
+                              if (!mounted || !_pageController.hasClients) {
+                                return;
+                              }
+                              final target = savedIndex.clamp(
+                                0,
+                                _reelsDataList.length - 1,
+                              );
+                              if (target != _resolvedCurrentPageIndex) {
+                                _pageController.jumpToPage(target);
+                                _currentIndex.value = target;
+                              }
+                            },
+                            onCreatePost: () async {
+                              if (widget.reelsConfig.onCreatePost != null) {
+                                final result = await widget
+                                    .reelsConfig.onCreatePost!(reelsData);
+                                if (result != null) {
+                                  _reelsDataList.insert(index, result);
+                                  _updateState();
+                                }
+                              }
+                            },
+                            onPressFollowButton:
+                                widget.reelsConfig.onPressFollow,
+                            onPressLikeButton: widget.reelsConfig.onPressLike,
+                            onPressSaveButton: widget.reelsConfig.onPressSave,
+                            onTapMentionTag: (mentionedList) async {
+                              if (widget.reelsConfig.onTapMentionTag != null) {
+                                await widget.reelsConfig.onTapMentionTag!(
+                                  reelsData,
+                                  mentionedList,
+                                );
+                              }
+                            },
+                            onTapCartIcon: (productId) {
+                              widget.reelsConfig.onTaggedProduct
+                                  ?.call(reelsData);
+                            },
+                          ),
                         );
-                        if (target != _resolvedCurrentPageIndex) {
-                          _pageController.jumpToPage(target);
-                          _currentIndex.value = target;
-                        }
-                      },
-                      onCreatePost: () async {
-                        if (widget.reelsConfig.onCreatePost != null) {
-                          final result =
-                              await widget.reelsConfig.onCreatePost!(reelsData);
-                          if (result != null) {
-                            _reelsDataList.insert(index, result);
-                            _updateState();
-                          }
-                        }
-                      },
-                      onPressFollowButton: widget.reelsConfig.onPressFollow,
-                      onPressLikeButton: widget.reelsConfig.onPressLike,
-                      onPressSaveButton: widget.reelsConfig.onPressSave,
-                      onTapMentionTag: (mentionedList) async {
-                        if (widget.reelsConfig.onTapMentionTag != null) {
-                          await widget.reelsConfig.onTapMentionTag!(reelsData, mentionedList);
-                          // for untagging, do so from IsmSocialActionCubit
-                        }
-                      },
-                      onTapCartIcon: (productId) {
-                        widget.reelsConfig.onTaggedProduct?.call(reelsData);
                       },
                     ),
                   );
-                },
-              );
                 },
               ),
             ),
@@ -784,12 +819,9 @@ class _PostItemWidgetState extends State<PostItemWidget>
 
     final reelsData = _reelsDataList[index];
 
-    // Only log every 5th scroll to reduce performance impact
     if (index % 5 == 0) {
       debugPrint(
           '🎯 MainWidget: Page changed to index $index (@${reelsData.userName})');
-      // Periodically drop decoded bitmaps that accumulate while scrolling.
-      PaintingBinding.instance.imageCache.clearLiveImages();
     }
 
     // Current post stills only — do not precache ahead video bytes/decoders.
