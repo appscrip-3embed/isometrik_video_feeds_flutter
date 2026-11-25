@@ -261,6 +261,32 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     }
   }
 
+  /// FYP and trending use `cursor` / `next_cursor` instead of page/skip.
+  bool _usesCursorPagination(PostSectionType type) =>
+      type == PostSectionType.trending || type == PostSectionType.forYou;
+
+  String? _normalizeNextCursor(String? raw) {
+    final trimmed = raw?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
+  void _syncCursorPaginationState({
+    required PostTabAssistData tabAssistData,
+    required String? nextCursor,
+    required bool apiSucceeded,
+  }) {
+    if (!apiSucceeded) return;
+    final normalized = _normalizeNextCursor(nextCursor);
+    if (normalized != null) {
+      tabAssistData.cursor = normalized;
+      tabAssistData.hasMorePages = true;
+    } else {
+      tabAssistData.cursor = null;
+      tabAssistData.hasMorePages = false;
+    }
+  }
+
   void _syncPageBasedHasMore({
     required PostTabAssistData tabAssistData,
     required List<TimeLineData> pageItems,
@@ -567,6 +593,7 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     List<TimeLineData>? apiPostResult;
     AppError? apiError;
     TimelineResponse? timelineResponse;
+    String? apiNextCursor;
     switch (postSectionType) {
       case PostSectionType.trending:
         apiPostResult = await _getTrendingPostUseCase
@@ -577,9 +604,7 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         )
             .then((result) {
           apiError = result.error;
-          if (result.data?.data?.nextCursor?.isNotEmpty == true) {
-            tabAssistData.cursor = result.data?.data?.nextCursor;
-          }
+          apiNextCursor = result.data?.data?.nextCursor;
           return result.data?.data?.posts;
         });
         break;
@@ -592,7 +617,7 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         )
             .then((result) {
           apiError = result.error;
-          tabAssistData.cursor = result.data?.data?.nextCursor;
+          apiNextCursor = result.data?.data?.nextCursor;
           return result.data?.data?.posts;
         });
         break;
@@ -774,16 +799,24 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
           ..clear()
           ..addAll(postDataList);
       }
-      tabAssistData.currentPage++;
-      if (postSectionType == PostSectionType.following ||
-          postSectionType == PostSectionType.feeds) {
-        _syncPageBasedHasMore(
+      if (_usesCursorPagination(postSectionType)) {
+        _syncCursorPaginationState(
           tabAssistData: tabAssistData,
-          pageItems: postDataList,
-          total: timelineResponse?.total,
-          totalPages: timelineResponse?.totalPages,
-          apiPage: timelineResponse?.page ?? requestedPage,
+          nextCursor: apiNextCursor,
+          apiSucceeded: apiError == null,
         );
+      } else {
+        tabAssistData.currentPage++;
+        if (postSectionType == PostSectionType.following ||
+            postSectionType == PostSectionType.feeds) {
+          _syncPageBasedHasMore(
+            tabAssistData: tabAssistData,
+            pageItems: postDataList,
+            total: timelineResponse?.total,
+            totalPages: timelineResponse?.totalPages,
+            apiPage: timelineResponse?.page ?? requestedPage,
+          );
+        }
       }
       unawaited(FeedMediaOrientation.prefetchForPosts(postDataList));
 
@@ -799,12 +832,20 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         );
       }
     } else {
-      tabAssistData.hasMorePages = false;
-      if (!mergeEnabled) {
-        tabAssistData.cursor = null;
-        if (apiError != null) {
-          ErrorHandler.showAppError(
-              appError: apiError, errorViewType: ErrorViewType.snackBar);
+      if (_usesCursorPagination(postSectionType) && apiError == null) {
+        _syncCursorPaginationState(
+          tabAssistData: tabAssistData,
+          nextCursor: apiNextCursor,
+          apiSucceeded: true,
+        );
+      } else {
+        tabAssistData.hasMorePages = false;
+        if (!mergeEnabled) {
+          tabAssistData.cursor = null;
+          if (apiError != null) {
+            ErrorHandler.showAppError(
+                appError: apiError, errorViewType: ErrorViewType.snackBar);
+          }
         }
       }
     }

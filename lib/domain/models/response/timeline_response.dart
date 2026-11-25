@@ -130,7 +130,8 @@ class TimeLineBodyData {
   factory TimeLineBodyData.fromMap(Map<String, dynamic> json) =>
       TimeLineBodyData(
         posts: _parseObjectList(json, 'posts', TimeLineData.fromMap),
-        nextCursor: json.getString('next_cursor'),
+        // API returns null when there is no next page; avoid coercing to ''.
+        nextCursor: json.stringOrNull('next_cursor'),
       );
 
   List<TimeLineData>? posts;
