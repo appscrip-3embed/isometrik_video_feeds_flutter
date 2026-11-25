@@ -359,6 +359,7 @@ class IsmDataProvider {
     required int page,
     required int pageSize,
     bool isLoading = false,
+    bool scheduledOnly = false,
     Function(String, int)? onSuccess,
     Function(String, int)? onError,
   }) async {
@@ -368,6 +369,7 @@ class IsmDataProvider {
         page: page,
         pageSize: pageSize,
         memberId: userId,
+        scheduledOnly: scheduledOnly,
       ),
       toJson: (data) => data?.toMap() ?? {},
       onSuccess: onSuccess,

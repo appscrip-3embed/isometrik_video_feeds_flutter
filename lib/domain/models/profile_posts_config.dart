@@ -6,6 +6,7 @@ import 'package:ism_video_reel_player/res/constants/asset_constants.dart';
 class ProfilePostsConfig {
   const ProfilePostsConfig({
     this.enablePostTypeTabs = false,
+    this.enableScheduledPostsTab = true,
     this.contentHorizontalPadding = 16,
     this.textPostHorizontalPadding = 16,
     this.reelsPlayerOverlayPadding,
@@ -16,6 +17,10 @@ class ProfilePostsConfig {
 
   /// When true, profile posts show Media / Text filter pills (client-side).
   final bool enablePostTypeTabs;
+
+  /// When true, own-profile posts tab also shows a Scheduled pill that loads
+  /// user posts with `scheduled_only=true` (server-side filter).
+  final bool enableScheduledPostsTab;
 
   /// Horizontal inset for media grid and filter pills (from screen edge).
   final double contentHorizontalPadding;
@@ -43,6 +48,7 @@ class ProfilePostsConfig {
 
   ProfilePostsConfig copyWith({
     bool? enablePostTypeTabs,
+    bool? enableScheduledPostsTab,
     double? contentHorizontalPadding,
     double? textPostHorizontalPadding,
     EdgeInsetsGeometry? reelsPlayerOverlayPadding,
@@ -52,6 +58,8 @@ class ProfilePostsConfig {
   }) =>
       ProfilePostsConfig(
         enablePostTypeTabs: enablePostTypeTabs ?? this.enablePostTypeTabs,
+        enableScheduledPostsTab:
+            enableScheduledPostsTab ?? this.enableScheduledPostsTab,
         contentHorizontalPadding:
             contentHorizontalPadding ?? this.contentHorizontalPadding,
         textPostHorizontalPadding:

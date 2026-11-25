@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:ism_video_reel_player/data/data.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/isr_video_reel_config.dart';
 import 'package:ism_video_reel_player/presentation/cubits/social_action/social_action_cubit.dart';
@@ -153,6 +156,48 @@ class _ProfilePostsTypeFilterTab extends StatefulWidget {
 
 class _ProfilePostsTypeFilterTabState extends State<_ProfilePostsTypeFilterTab> {
   ProfilePostTypeFilter _selectedFilter = ProfilePostTypeFilter.media;
+  final GlobalKey<_ProfileScheduledPostsSectionState> _scheduledPostsKey =
+      GlobalKey<_ProfileScheduledPostsSectionState>();
+
+  bool get _showScheduledTab {
+    final profileConfig =
+        IsrVideoReelConfig.postConfig.resolvedProfilePostsConfig;
+    if (!profileConfig.enableScheduledPostsTab) return false;
+    if (widget.postSectionType != PostSectionType.myPost) return false;
+    final memberId = (widget.profileOwnerClientUserId ?? '').trim().isNotEmpty
+        ? widget.profileOwnerClientUserId!.trim()
+        : (widget.profileOwnerUserId ?? '').trim();
+    return memberId.isNotEmpty;
+  }
+
+  String? get _scheduledMemberId {
+    if (!_showScheduledTab) return null;
+    final clientId = (widget.profileOwnerClientUserId ?? '').trim();
+    if (clientId.isNotEmpty) return clientId;
+    return (widget.profileOwnerUserId ?? '').trim();
+  }
+
+  bool _onAncestorScrollNotification(ScrollNotification notification) {
+    if (_selectedFilter != ProfilePostTypeFilter.scheduled) return false;
+    if (notification.metrics.extentAfter > 500) return false;
+    if (notification is ScrollUpdateNotification ||
+        notification is OverscrollNotification) {
+      _scheduledPostsKey.currentState?.maybeLoadMore();
+    }
+    return false;
+  }
+
+  void _selectFilter(ProfilePostTypeFilter filter) {
+    if (_selectedFilter == filter) return;
+    setState(() => _selectedFilter = filter);
+  }
+
+  Future<void> _handlePostsRefresh() async {
+    await widget.onRefresh();
+    if (_selectedFilter == ProfilePostTypeFilter.scheduled) {
+      await _scheduledPostsKey.currentState?.refresh();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -162,68 +207,88 @@ class _ProfilePostsTypeFilterTabState extends State<_ProfilePostsTypeFilterTab> 
       widget.posts,
       _selectedFilter,
     );
-    final isMediaFilter = _selectedFilter == ProfilePostTypeFilter.media;
     final horizontalPadding = profileConfig.contentHorizontalPadding;
+    final isMediaFilter = _selectedFilter == ProfilePostTypeFilter.media;
+    final isTextFilter = _selectedFilter == ProfilePostTypeFilter.text;
+    final isScheduledFilter =
+        _selectedFilter == ProfilePostTypeFilter.scheduled;
 
     return _ProfilePostsSocialListener(
-      onRefresh: widget.onRefresh,
+      onRefresh: _handlePostsRefresh,
       onMentionRemoved: widget.onMentionRemoved,
       postSectionType: widget.postSectionType,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: [
-                _ProfilePostTypePill(
-                  title: IsrTranslationFile.profileMediaPostsTab,
-                  isSelected: isMediaFilter,
-                  onTap: () => setState(
-                    () => _selectedFilter = ProfilePostTypeFilter.media,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _ProfilePostTypePill(
-                  title: IsrTranslationFile.profileTextPostsTab,
-                  isSelected: !isMediaFilter,
-                  onTap: () => setState(
-                    () => _selectedFilter = ProfilePostTypeFilter.text,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (isMediaFilter)
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onAncestorScrollNotification,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
             Padding(
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-              child: _ProfilePostsGrid(
-                isLoading: widget.isLoading,
-                posts: filteredPosts,
-                extractMediaUrl: widget.extractMediaUrl,
-                emptyIcon: profileConfig.resolvedNoMediaPostsIcon,
-                emptyTitle: IsrTranslationFile.profileNoMediaPostsTitle,
-                emptySubtitle: IsrTranslationFile.profileNoMediaPostsSubtitle,
-                postSectionType: widget.postSectionType,
-                tagValue: widget.tagValue,
-                tagType: widget.tagType,
-                loggedInUserId: widget.loggedInUserId,
-                lockSeededPostList: widget.lockSeededPostList,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  _ProfilePostTypePill(
+                    title: IsrTranslationFile.profileMediaPostsTab,
+                    isSelected: isMediaFilter,
+                    onTap: () => _selectFilter(ProfilePostTypeFilter.media),
+                  ),
+                  const SizedBox(width: 8),
+                  _ProfilePostTypePill(
+                    title: IsrTranslationFile.profileTextPostsTab,
+                    isSelected: isTextFilter,
+                    onTap: () => _selectFilter(ProfilePostTypeFilter.text),
+                  ),
+                  if (_showScheduledTab) ...[
+                    const SizedBox(width: 8),
+                    _ProfilePostTypePill(
+                      title: IsrTranslationFile.scheduled,
+                      isSelected: isScheduledFilter,
+                      onTap: () =>
+                          _selectFilter(ProfilePostTypeFilter.scheduled),
+                    ),
+                  ],
+                ],
               ),
-            )
-          else
-            ProfileTextPostsFeed(
-              posts: filteredPosts,
-              isLoading: widget.isLoading,
-              isLoadingMore: widget.isLoadingMore,
-              postSectionType: widget.postSectionType,
-              loggedInUserId: widget.loggedInUserId,
-              profileOwnerUserId: widget.profileOwnerUserId,
-              profileOwnerClientUserId: widget.profileOwnerClientUserId,
             ),
-        ],
+            const SizedBox(height: 8),
+            if (isMediaFilter)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                child: _ProfilePostsGrid(
+                  isLoading: widget.isLoading,
+                  posts: filteredPosts,
+                  extractMediaUrl: widget.extractMediaUrl,
+                  emptyIcon: profileConfig.resolvedNoMediaPostsIcon,
+                  emptyTitle: IsrTranslationFile.profileNoMediaPostsTitle,
+                  emptySubtitle: IsrTranslationFile.profileNoMediaPostsSubtitle,
+                  postSectionType: widget.postSectionType,
+                  tagValue: widget.tagValue,
+                  tagType: widget.tagType,
+                  loggedInUserId: widget.loggedInUserId,
+                  lockSeededPostList: widget.lockSeededPostList,
+                ),
+              )
+            else if (isTextFilter)
+              ProfileTextPostsFeed(
+                posts: filteredPosts,
+                isLoading: widget.isLoading,
+                isLoadingMore: widget.isLoadingMore,
+                postSectionType: widget.postSectionType,
+                loggedInUserId: widget.loggedInUserId,
+                profileOwnerUserId: widget.profileOwnerUserId,
+                profileOwnerClientUserId: widget.profileOwnerClientUserId,
+              )
+            else if (isScheduledFilter && _scheduledMemberId != null)
+              _ProfileScheduledPostsSection(
+                key: _scheduledPostsKey,
+                memberId: _scheduledMemberId!,
+                postSectionType: widget.postSectionType,
+                contentHorizontalPadding: horizontalPadding,
+                loggedInUserId: widget.loggedInUserId,
+                extractMediaUrl: widget.extractMediaUrl,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -517,6 +582,158 @@ class _ProfilePostThumbnail extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Own-profile scheduled sub-tab (`scheduled_only=true` on user posts API).
+class _ProfileScheduledPostsSection extends StatefulWidget {
+  const _ProfileScheduledPostsSection({
+    super.key,
+    required this.memberId,
+    required this.postSectionType,
+    required this.contentHorizontalPadding,
+    this.loggedInUserId,
+    this.extractMediaUrl,
+    this.pageSize = 20,
+  });
+
+  final String memberId;
+  final PostSectionType postSectionType;
+  final double contentHorizontalPadding;
+  final String? loggedInUserId;
+  final String? Function(dynamic post)? extractMediaUrl;
+  final int pageSize;
+
+  @override
+  State<_ProfileScheduledPostsSection> createState() =>
+      _ProfileScheduledPostsSectionState();
+}
+
+class _ProfileScheduledPostsSectionState
+    extends State<_ProfileScheduledPostsSection> {
+  final List<TimeLineData> _posts = [];
+  var _page = 0;
+  var _hasMore = true;
+  var _isLoading = false;
+  var _isLoadingMore = false;
+  var _hasLoadedOnce = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load(refresh: true));
+  }
+
+  Future<void> refresh() => _load(refresh: true);
+
+  void maybeLoadMore() {
+    if (!_hasMore || _isLoading || _isLoadingMore) return;
+    unawaited(_load(refresh: false));
+  }
+
+  Future<void> _load({required bool refresh}) async {
+    if (_isLoading || _isLoadingMore) return;
+    if (!refresh && (!_hasMore || _page < 1)) return;
+
+    final nextPage = refresh ? 1 : _page + 1;
+    if (!mounted) return;
+    setState(() {
+      if (refresh) {
+        _isLoading = true;
+        _isLoadingMore = false;
+      } else {
+        _isLoadingMore = true;
+      }
+    });
+
+    final completer = Completer<void>();
+    await IsmDataProvider.instance.getUserPosts(
+      userId: widget.memberId,
+      page: nextPage,
+      pageSize: widget.pageSize,
+      scheduledOnly: true,
+      isLoading: false,
+      onSuccess: (result, responseCode) {
+        if (!mounted) {
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+        final timeline = timelineResponseFromJson(result);
+        final incoming = timeline.data ?? <TimeLineData>[];
+        setState(() {
+          _hasLoadedOnce = true;
+          if (refresh) {
+            _posts
+              ..clear()
+              ..addAll(incoming);
+          } else {
+            _posts.addAll(incoming);
+          }
+          _page = nextPage;
+          final total = timeline.total?.toInt();
+          _hasMore = total != null && total > 0
+              ? _posts.length < total
+              : incoming.length >= widget.pageSize;
+          _isLoading = false;
+          _isLoadingMore = false;
+        });
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (_, __) {
+        if (!mounted) {
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+        setState(() {
+          _hasLoadedOnce = true;
+          if (refresh) {
+            _posts.clear();
+            _page = 0;
+            _hasMore = true;
+          }
+          _isLoading = false;
+          _isLoadingMore = false;
+        });
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+    await completer.future;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<IsmSocialActionCubit, IsmSocialActionState>(
+      listenWhen: (previous, current) =>
+          current is IsmDeletedPostActionListenerState ||
+          current is IsmEditPostActionListenerState ||
+          current is IsmCreatePostActionListenerState,
+      listener: (_, __) => unawaited(_load(refresh: true)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.contentHorizontalPadding,
+            ),
+            child: _ProfilePostsGrid(
+              isLoading: _isLoading,
+              posts: _posts,
+              extractMediaUrl: widget.extractMediaUrl,
+              emptyIcon: AssetConstants.icNoScheduledPost,
+              emptyTitle: IsrTranslationFile.noScheduledPosts,
+              emptySubtitle: IsrTranslationFile.addNewScheduledPosts,
+              postSectionType: widget.postSectionType,
+              loggedInUserId: widget.loggedInUserId,
+            ),
+          ),
+          if (_isLoadingMore)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            ),
+        ],
+      ),
     );
   }
 }
