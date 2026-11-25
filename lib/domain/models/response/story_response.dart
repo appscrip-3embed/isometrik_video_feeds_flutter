@@ -477,6 +477,7 @@ class StoryHighlightData {
     this.sortOrder = 0,
     this.items = const [],
     this.embeddedStories = const [],
+    this.engagementStories = const [],
   });
 
   factory StoryHighlightData.fromMap(Map<String, dynamic> map) =>
@@ -488,6 +489,7 @@ class StoryHighlightData {
         sortOrder: (map['sort_order'] as num?)?.toInt() ?? 0,
         items: _highlightItemsFromMap(map),
         embeddedStories: _embeddedStoriesFromHighlightMap(map),
+        engagementStories: _engagementStoriesFromHighlightMap(map),
       );
 
   /// Full story rows from `GET .../highlights/:id` (`data.stories`). Used to open
@@ -496,16 +498,68 @@ class StoryHighlightData {
   static List<StoryData> _embeddedStoriesFromHighlightMap(
     Map<String, dynamic> map,
   ) {
-    final dynamic raw = map['stories'];
-    if (raw is! List<dynamic> || raw.isEmpty) return const [];
-    return raw
-        .map((e) => e is Map ? Map<String, dynamic>.from(e) : null)
-        .whereType<Map<String, dynamic>>()
+    return _storyMapsFromHighlightMap(map)
         .map(StoryData.fromMap)
         .where(
-          (s) => s.id.trim().isNotEmpty && s.mediaUrl.trim().isNotEmpty,
+          (s) =>
+              s.id.trim().isNotEmpty &&
+              (s.mediaUrl.trim().isNotEmpty ||
+                  s.previewUrl.trim().isNotEmpty ||
+                  (s.media?.url?.trim().isNotEmpty ?? false)),
         )
         .toList();
+  }
+
+  /// Every story row on highlight detail (for `view_count` when playback uses feed cache).
+  static List<StoryData> _engagementStoriesFromHighlightMap(
+    Map<String, dynamic> map,
+  ) =>
+      _storyMapsFromHighlightMap(map)
+          .map(StoryData.fromMap)
+          .where((s) => s.id.trim().isNotEmpty)
+          .toList();
+
+  static List<Map<String, dynamic>> _storyMapsFromHighlightMap(
+    Map<String, dynamic> map,
+  ) {
+    final out = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    void addMap(Map<String, dynamic> storyMap) {
+      final id = (storyMap['story_id'] ??
+              storyMap['storyId'] ??
+              storyMap['id'])
+          ?.toString()
+          .trim();
+      if (id == null || id.isEmpty || seen.contains(id)) return;
+      seen.add(id);
+      if (storyMap['id'] != null) {
+        out.add(storyMap);
+        return;
+      }
+      out.add({...storyMap, 'id': id});
+    }
+
+    final rawStories = map['stories'];
+    if (rawStories is List<dynamic>) {
+      for (final e in rawStories) {
+        if (e is! Map) continue;
+        addMap(Map<String, dynamic>.from(e));
+      }
+    }
+
+    final rawItems = map['items'];
+    if (rawItems is List<dynamic>) {
+      for (final e in rawItems) {
+        if (e is! Map) continue;
+        final item = Map<String, dynamic>.from(e);
+        final nested = item['story'] ?? item['story_data'];
+        if (nested is Map) {
+          addMap(Map<String, dynamic>.from(nested));
+        }
+      }
+    }
+    return out;
   }
 
   static List<StoryHighlightItem> _highlightItemsFromMap(
@@ -550,6 +604,9 @@ class StoryHighlightData {
   final int sortOrder;
   final List<StoryHighlightItem> items;
   final List<StoryData> embeddedStories;
+
+  /// Parsed from `GET /highlights/:id`; carries `engagement_metrics.view_count`.
+  final List<StoryData> engagementStories;
 }
 
 class StoryHighlightItem {

@@ -20,6 +20,37 @@ class HighlightViewerResolver {
   static List<StoryData> storiesFromGroups(List<StoryGroup> groups) =>
       groups.expand((group) => group.stories).toList();
 
+  /// Feed/highlight cache rows often lack `view_count`; highlight detail has it.
+  static List<StoryData> applyEngagementMetrics({
+    required List<StoryData> resolved,
+    required Iterable<StoryData> metricSources,
+  }) {
+    if (resolved.isEmpty) return resolved;
+    final byId = <String, StoryData>{};
+    for (final source in metricSources) {
+      final id = normalizeStoryId(source.id);
+      if (id.isEmpty) continue;
+      final existing = byId[id];
+      if (existing == null || source.viewCount > existing.viewCount) {
+        byId[id] = source;
+      }
+    }
+    if (byId.isEmpty) return resolved;
+    return resolved
+        .map((story) {
+          final metric = byId[normalizeStoryId(story.id)];
+          if (metric == null || metric.viewCount <= story.viewCount) {
+            return story;
+          }
+          return story.copyWith(
+            viewCount: metric.viewCount,
+            engagementMetrics:
+                story.engagementMetrics ?? metric.engagementMetrics,
+          );
+        })
+        .toList();
+  }
+
   static List<StoryData> resolveStoriesByIds({
     required List<StoryData> stories,
     required List<String> storyIds,

@@ -46,6 +46,25 @@ void main() {
       expect(resolved, isEmpty);
     });
 
+    test('applyEngagementMetrics copies view_count onto feed cache', () {
+      final fromFeed = StoryData(
+        id: 'story_1',
+        userId: 'user_1',
+        mediaUrl: 'https://x.jpg',
+      );
+      final fromHighlightDetail = StoryData(
+        id: 'story_1',
+        userId: 'user_1',
+        mediaUrl: '',
+        viewCount: 1,
+      );
+      final merged = HighlightViewerResolver.applyEngagementMetrics(
+        resolved: [fromFeed],
+        metricSources: [fromHighlightDetail],
+      );
+      expect(merged.single.viewCount, 1);
+    });
+
     test('feed empty but detail fetch list can resolve stories', () {
       final fetchedStory = StoryData(
         id: 'story_2',

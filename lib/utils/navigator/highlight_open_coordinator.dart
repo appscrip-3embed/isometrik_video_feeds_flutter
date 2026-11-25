@@ -146,6 +146,39 @@ class HighlightOpenCoordinator {
       );
     }
 
+    steps.add('merge_engagement_from_highlight_detail');
+    resolvedStories = HighlightViewerResolver.applyEngagementMetrics(
+      resolved: resolvedStories,
+      metricSources: <StoryData>[
+        ...highlightData?.engagementStories ?? const <StoryData>[],
+        ...embedded,
+        ...HighlightViewerResolver.storiesFromGroups(cubit.cachedStoryGroups),
+      ],
+    );
+
+    if (resolvedStories.any((s) => s.viewCount == 0)) {
+      steps.add('enrich_view_count_from_detail');
+      final enriched = <StoryData>[];
+      for (final story in resolvedStories) {
+        if (story.viewCount > 0) {
+          enriched.add(story);
+          continue;
+        }
+        final detail = await cubit.getStoryDetailById(story.id);
+        if (detail != null) {
+          enriched.add(
+            HighlightViewerResolver.applyEngagementMetrics(
+              resolved: [story],
+              metricSources: [detail],
+            ).first,
+          );
+        } else {
+          enriched.add(story);
+        }
+      }
+      resolvedStories = enriched;
+    }
+
     if (resolvedStories.isEmpty) {
       steps.add('resolve_failed_no_active_story');
       const reason = 'Stories were removed or expired. Add stories to continue.';
