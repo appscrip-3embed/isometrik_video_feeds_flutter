@@ -17,6 +17,5 @@ ScrollPhysics reelsFeedScrollPhysics(BuildContext context) {
   return parent;
 }
 
-/// One neighbor page on each side — package default; keeps the next reel built
-/// during a swipe without warming video decoders (see [PostItemWidget]).
-const int kReelsFeedPreloadPagesCount = 1;
+/// Two pages below + one above (package default is 1) — matches [ReelsFeedPrecacheCoordinator].
+const int kReelsFeedPreloadPagesCount = 2;

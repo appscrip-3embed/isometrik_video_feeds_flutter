@@ -189,13 +189,17 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   static const Duration _sizeWaitTimeout = Duration(milliseconds: 800);
 
-  /// Soft global cap — one live decoder (handoff briefly may hold a second
-  /// until the previous finishes delayed dispose).
-  static const int _maxLiveControllers = 1;
+  /// Live decoders — keep low on Android (SurfaceView buffer limits / BLASTBufferQueue).
+  static int get _maxLiveControllers => Platform.isAndroid ? 2 : 4;
 
   /// Insertion-ordered live controller map (url → wrapper).
   final LinkedHashMap<String, IVideoPlayerController> _liveControllers =
       LinkedHashMap<String, IVideoPlayerController>();
+
+  /// URLs in the reels warm window — evicted only after leaving the window.
+  final Set<String> _warmPinnedUrls = <String>{};
+
+  final Set<String> _initializingUrls = <String>{};
 
   void _trackLive(String url, IVideoPlayerController controller) {
     _liveControllers.remove(url);
@@ -210,11 +214,46 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     _liveControllers.remove(url);
   }
 
+  /// Host feed passes display URLs (Gumlet/original) for the warm window.
+  void setWarmPinnedUrls(Set<String> urls) {
+    _warmPinnedUrls
+      ..clear()
+      ..addAll(urls);
+  }
+
+  /// Clears warm pins and disposes pooled decoders (profile / other tabs).
+  void disposeReelsWarmPool() {
+    _warmPinnedUrls.clear();
+    _initializingUrls.clear();
+    final entries = _liveControllers.entries.toList();
+    _liveControllers.clear();
+    for (final entry in entries) {
+      final controller = entry.value;
+      if (FeedVideoPlayerHandoff.isControllerProtected(controller)) {
+        _liveControllers[entry.key] = controller;
+        continue;
+      }
+      try {
+        if (controller is StandardVideoNonPreloadedController) {
+          controller.prepareForDispose();
+        }
+        VideoControllerDisposeScheduler.cancel(controller);
+        VideoControllerDisposeScheduler.scheduleAfterUnmount(
+          controller,
+          controller.dispose,
+        );
+      } catch (e) {
+        debugPrint('⚠️ disposeReelsWarmPool error for ${entry.key}: $e');
+      }
+    }
+  }
+
   void _evictIfOverCap({String? exceptUrl}) {
     while (_liveControllers.length > _maxLiveControllers) {
       String? evictUrl;
       for (final entry in _liveControllers.entries) {
         if (entry.key == exceptUrl) continue;
+        if (_warmPinnedUrls.contains(entry.key)) continue;
         if (FeedVideoPlayerHandoff.isControllerProtected(entry.value)) {
           continue;
         }
@@ -243,26 +282,59 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     List<String> videoUrls, {
     bool highPriority = false,
   }) async {
+    final toWarm = <String>[];
     for (final url in videoUrls) {
-      if (url.endsWith('.m3u8')) {
+      if (url.isEmpty) continue;
+      final lower = url.toLowerCase();
+      if (lower.endsWith('.m3u8')) {
         unawaited(VideoMediaUtil.precacheFirstSegment(url));
       }
+      if (!highPriority) continue;
+      if (_liveControllers.containsKey(url) || _initializingUrls.contains(url)) {
+        continue;
+      }
+      toWarm.add(url);
+    }
+
+    final parallel = Platform.isAndroid ? 1 : 2;
+    for (var i = 0; i < toWarm.length; i += parallel) {
+      final batch = toWarm.skip(i).take(parallel);
+      await Future.wait(
+        batch.map((url) {
+          _initializingUrls.add(url);
+          return _createAndInitializeController(url).whenComplete(() {
+            _initializingUrls.remove(url);
+          });
+        }),
+      );
     }
   }
 
   @override
-  IVideoPlayerController? getCachedController(String url) =>
-      _liveControllers[url];
+  IVideoPlayerController? getCachedController(String url) {
+    final controller = _liveControllers[url];
+    if (controller == null) return null;
+    if (controller.isDisposed || !controller.isInitialized) {
+      _liveControllers.remove(url);
+      return null;
+    }
+    return controller;
+  }
 
   @override
   Future<IVideoPlayerController?> precacheMediaAndReturnController(
       String url, {
         bool useFallBackControllerOnFail = true,
-      }) =>
-      Future<IVideoPlayerController?>.delayed(
-        const Duration(milliseconds: 300),
-        () => _createAndInitializeController(url, useFallBackControllerOnFail: useFallBackControllerOnFail),
-      );
+      }) {
+    final cached = getCachedController(url);
+    if (cached != null && !cached.isDisposed && cached.isInitialized) {
+      return Future.value(cached);
+    }
+    return _createAndInitializeController(
+      url,
+      useFallBackControllerOnFail: useFallBackControllerOnFail,
+    );
+  }
 
   Future<IVideoPlayerController?> _createAndInitializeController(
       String url, {
@@ -420,10 +492,13 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
   }
 
   @override
-  bool isVideoCached(String url) => false;
+  bool isVideoCached(String url) {
+    final c = _liveControllers[url];
+    return c != null && !c.isDisposed && c.isInitialized;
+  }
 
   @override
-  bool isVideoInitializing(String url) => false;
+  bool isVideoInitializing(String url) => _initializingUrls.contains(url);
 
   @override
   void markAsVisible(String url) {}
@@ -450,6 +525,9 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
       final remaining = controller.release();
       if (remaining > 0) return;
 
+      // Decoder stays in the warm pool for the next widget attach.
+      if (_warmPinnedUrls.contains(url)) return;
+
       _untrack(url, controller);
       // Drop platform view immediately, then dispose native after unmount.
       controller.prepareForDispose();
@@ -475,8 +553,32 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     });
   }
 
+  void forceClearVideo(String url) {
+    _warmPinnedUrls.remove(url);
+    _initializingUrls.remove(url);
+    final controller = _liveControllers.remove(url);
+    if (controller == null) return;
+    if (FeedVideoPlayerHandoff.isControllerProtected(controller)) {
+      _liveControllers[url] = controller;
+      return;
+    }
+    try {
+      if (controller is StandardVideoNonPreloadedController) {
+        controller.prepareForDispose();
+      }
+      VideoControllerDisposeScheduler.cancel(controller);
+      VideoControllerDisposeScheduler.scheduleAfterUnmount(
+        controller,
+        controller.dispose,
+      );
+    } catch (e) {
+      debugPrint('⚠️ forceClearVideo error for $url: $e');
+    }
+  }
+
   @override
   void clearVideo(String url) {
+    if (_warmPinnedUrls.contains(url)) return;
     final controller = _liveControllers.remove(url);
     if (controller == null) return;
     if (FeedVideoPlayerHandoff.isControllerProtected(controller)) {
@@ -525,10 +627,11 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   @override
   Map<String, dynamic> getCacheStats() => {
-        'mode': 'non-cache',
+        'mode': 'reels-warm-pool',
         'cached_videos': _liveControllers.length,
         'max_live': _maxLiveControllers,
-        'initializing_videos': 0,
+        'warm_pinned': _warmPinnedUrls.length,
+        'initializing_videos': _initializingUrls.length,
         'visible_videos': 0,
       };
 }

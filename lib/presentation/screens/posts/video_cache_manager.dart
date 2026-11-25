@@ -29,6 +29,27 @@ class VideoCacheManager implements IMediaCacheManager {
   }
 
   /// Switch video player type
+  /// Pins display URLs in the reels warm pool ([StandardVideoNonPreloadedManager]).
+  void setWarmPinnedReelVideoUrls(Iterable<String> originalMediaUrls) {
+    final display = originalMediaUrls.map(_displayUrl).toSet();
+    final mgr = _cacheManager;
+    if (mgr is StandardVideoNonPreloadedManager) {
+      mgr.setWarmPinnedUrls(display);
+    }
+  }
+
+  /// Tear down warm pool after leaving reels (avoids zombie surfaces on return).
+  static void disposeReelsWarmPool() {
+    VideoCacheManager()._disposeReelsWarmPoolIfSupported();
+  }
+
+  void _disposeReelsWarmPoolIfSupported() {
+    final mgr = _cacheManager;
+    if (mgr is StandardVideoNonPreloadedManager) {
+      mgr.disposeReelsWarmPool();
+    }
+  }
+
   void setVideoPlayerType(VideoPlayerType type) {
     if (_currentType != type) {
       _cacheManager.clearControllers();
@@ -101,6 +122,16 @@ class VideoCacheManager implements IMediaCacheManager {
 
   @override
   void clearMedia(String url) => _cacheManager.clearVideo(_displayUrl(url));
+
+  void forceClearMedia(String url) {
+    final mgr = _cacheManager;
+    final display = _displayUrl(url);
+    if (mgr is StandardVideoNonPreloadedManager) {
+      mgr.forceClearVideo(display);
+    } else {
+      clearMedia(url);
+    }
+  }
 
   @override
   void clearCache() {

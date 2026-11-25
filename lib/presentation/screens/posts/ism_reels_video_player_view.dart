@@ -348,6 +348,14 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   bool get _isPreloaded => widget.index != widget.currentIndex.value;
 
+  /// Decoder warm-up for reels in the sliding window ([ReelsFeedPrecacheCoordinator]).
+  bool get _warmDecoderWhilePreloaded =>
+      _isPreloaded &&
+      ReelsFeedPrecacheCoordinator.isWarmAheadSlot(
+        reelIndex: widget.index,
+        currentIndex: widget.currentIndex.value,
+      );
+
   // current media progress tracking
   Duration _currentMediaWatchDuration = Duration.zero;
   final ValueNotifier<double> _currentMediaProgress =
@@ -436,6 +444,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     debugPrint(
         'IsmReelsVideoPlayerView: _onCurrentIndexChanged {Post index: ${widget.index}, currentIndex: ${widget.currentIndex.value}}');
     _wasVisiblePost = isVisible;
+  // Rebuild so [VideoPlayerWidget] picks up isPreloaded / warmDecoder flags.
+    if (mounted) setState(() {});
   }
 
   @override
@@ -1248,6 +1258,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
         key: _currentVideoPlayerKey,
         logIndex: '${widget.index}-0}',
         isPreloaded: _isPreloaded,
+        warmDecoderWhilePreloaded: _warmDecoderWhilePreloaded,
       );
     }
   }
@@ -1257,6 +1268,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     Key? key,
     String? logIndex,
     bool isPreloaded = false,
+    bool warmDecoderWhilePreloaded = false,
     int? carouselPageIndex,
   }) {
     final isCarouselPage = carouselPageIndex != null;
@@ -1289,6 +1301,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
         _updatePostProgress();
       },
       isPreloaded: isPreloaded,
+      warmDecoderWhilePreloaded: warmDecoderWhilePreloaded,
       logIndex: logIndex,
       initialPosition: _shouldApplyStartPosition(carouselPageIndex)
           ? _startPosition
@@ -3427,6 +3440,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
           key: _videoPlayerKeys[index],
           logIndex: '${widget.index}-$index}',
           isPreloaded: _isPreloaded || index != _currentPageNotifier.value,
+          warmDecoderWhilePreloaded:
+              _warmDecoderWhilePreloaded && index == _currentPageNotifier.value,
           carouselPageIndex: index,
         ),
       );

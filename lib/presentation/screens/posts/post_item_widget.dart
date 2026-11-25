@@ -141,6 +141,13 @@ class _PostItemWidgetState extends State<PostItemWidget>
     if (!widget.reelsConfig.isTabVisible()) return;
     _isPlaybackBlocked = false;
     _lifecycleResumeTick.value++;
+    // Current reel first; ahead warm-up after surfaces settle (profile → reels).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 450), () {
+        if (!mounted || !IsrVideoReelConfig.allowsPlayback) return;
+        _warmReelsAroundIndex(_resolvedCurrentPageIndex);
+      });
+    });
   }
 
   /// Same resume path as comment-sheet close: post-frame + lifecycle tick so
@@ -188,7 +195,20 @@ class _PostItemWidgetState extends State<PostItemWidget>
       if (_scrollAheadPrecacheIndex == ahead) return;
       _scrollAheadPrecacheIndex = ahead;
       unawaited(_doMediaCaching(ahead));
+      ReelsFeedPrecacheCoordinator.warmWindow(
+        cache: _videoCacheManager,
+        reels: _reelsDataList,
+        currentIndex: dragTarget,
+      );
     });
+  }
+
+  void _warmReelsAroundIndex(int currentIndex) {
+    ReelsFeedPrecacheCoordinator.warmWindow(
+      cache: _videoCacheManager,
+      reels: _reelsDataList,
+      currentIndex: currentIndex,
+    );
   }
 
   @override
@@ -337,8 +357,7 @@ class _PostItemWidgetState extends State<PostItemWidget>
       // Start caching other media in parallel (non-blocking)
       unawaited(_doMediaCaching(0));
 
-      // Start background preloading of remaining posts (low priority)
-      unawaited(_backgroundPreloadPosts());
+      _warmReelsAroundIndex(_currentIndex.value);
     }
 
     if (!mounted) return;
@@ -709,18 +728,14 @@ class _PostItemWidgetState extends State<PostItemWidget>
                       onPageChanged: (index) {
                         _currentIndex.value = index;
                         _scrollAheadPrecacheIndex = null;
-                        // Release preloaded decoders after the new page paints.
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          IsrActiveVideoPlayerRegistry.releasePreloadedMemory();
-                        });
+                        _warmReelsAroundIndex(index);
                         _schedulePlaybackResumeForCurrentPage();
-                        _doMediaCaching(index);
+                        unawaited(_doMediaCaching(index));
                         final post = _reelsDataList[index];
-                        final threshold =
-                            (_reelsDataList.length * 0.65).floor();
-                        if (index >= threshold ||
-                            index == _reelsDataList.length - 1) {
+                        if (ReelsFeedPrecacheCoordinator.shouldPrefetchFeedPage(
+                          index: index,
+                          listLength: _reelsDataList.length,
+                        )) {
                           _requestReelsLoadMore();
                         }
                         widget.reelsConfig.onReelsChange?.call(post, index);
@@ -809,10 +824,6 @@ class _PostItemWidgetState extends State<PostItemWidget>
         ],
       );
 
-  /// Background preloading disabled — ahead video/byte warm-up was a major
-  /// scroll RAM contributor. Thumbnails for the current page are enough.
-  Future<void> _backgroundPreloadPosts() async {}
-
   // Handle media caching for both images and videos - OPTIMIZED FOR PERFORMANCE
   Future<void> _doMediaCaching(int index) async {
     if (_reelsDataList.isEmpty || index >= _reelsDataList.length) return;
@@ -824,7 +835,7 @@ class _PostItemWidgetState extends State<PostItemWidget>
           '🎯 MainWidget: Page changed to index $index (@${reelsData.userName})');
     }
 
-    // Current post stills only — do not precache ahead video bytes/decoders.
+    // Current post stills + next reel thumbnail; video warm-up is _warmNextReelDecoder.
     final currentPostThumbnails = <String>[];
     final currentPostImages = <String>[];
 
@@ -994,7 +1005,8 @@ class _PostItemWidgetState extends State<PostItemWidget>
               .any((existingReel) => existingReel.postId == newReel.postId));
       _reelsDataList.addAll(newReels);
       if (_reelsDataList.isNotEmpty) {
-        _doMediaCaching(0);
+        unawaited(_doMediaCaching(0));
+        _warmReelsAroundIndex(_resolvedCurrentPageIndex);
       }
       _updateState();
     }).whenComplete(() {

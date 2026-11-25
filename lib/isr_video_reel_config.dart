@@ -443,16 +443,30 @@ class IsrVideoReelConfig {
   static void pauseFeedPlayback() {
     isHostFeedTabVisible = false;
     _emitPlayPause(play: false);
+    IsrActiveVideoPlayerRegistry.releasePreloadedMemory();
     IsrActiveVideoPlayerRegistry.releaseHostFeedMemory();
+    VideoCacheManager.disposeReelsWarmPool();
   }
 
   /// Host-only: user returned to the reels bottom-nav tab.
   static void resumeFeedPlayback() {
     isHostFeedTabVisible = true;
-    _emitPlaybackResume(
-      notifyHostTabResumed: true,
-      scopedPostSection: getActiveHostPostSection?.call(),
-    );
+
+    void kick() {
+      if (!isHostFeedTabVisible || _overlayReelsPlayerCount > 0) return;
+      _emitPlaybackResume(
+        notifyHostTabResumed: true,
+        scopedPostSection: getActiveHostPostSection?.call(),
+      );
+      _invokeSectionForegroundResume(getActiveHostPostSection?.call());
+      VisibilityDetectorController.instance.notifyNow();
+    }
+
+    kick();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      kick();
+      WidgetsBinding.instance.addPostFrameCallback((_) => kick());
+    });
   }
 
   /// SDK overlays (sound sheet, capture) — pause without clearing host visibility.
@@ -558,6 +572,7 @@ class IsrVideoReelConfig {
         _overlayReelsPlayerCount > 0 ||
         _playbackSuppressionCount > 0) {
       IsrActiveVideoPlayerRegistry.releaseHostFeedMemory();
+      VideoCacheManager.disposeReelsWarmPool();
     }
     await IsrImageSoundRegistry.stopAll();
     await IsrReelsAudioLifecycle.deactivateAudioSessionBestEffort();

@@ -46,6 +46,9 @@ class VideoPlayerWidget extends StatefulWidget {
     this.initialPosition,
     this.releaseSurface = false,
     this.holdWarmPlayback = false,
+    /// When [isPreloaded] is true, still prepare the decoder for the next reel
+    /// (paused, no autoplay) so a vertical scroll does not cold-start playback.
+    this.warmDecoderWhilePreloaded = false,
   });
 
   final String mediaUrl;
@@ -91,6 +94,9 @@ class VideoPlayerWidget extends StatefulWidget {
   /// route is still sliding in.
   final bool holdWarmPlayback;
 
+  /// See [VideoPlayerWidget.warmDecoderWhilePreloaded].
+  final bool warmDecoderWhilePreloaded;
+
   @override
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 
@@ -108,6 +114,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   int _initGeneration = 0;
   /// True after [releaseControllerMemory] until this slot is allowed to init again.
   bool _memoryReleased = false;
+  int _initRetryCount = 0;
+  static const int _kMaxInitRetries = 3;
   bool _isVisible = false;
   bool _isDisposed = false;
   bool _listenersAttached = false;
@@ -136,6 +144,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   // Timer to check if controller is ready (for async initialization)
   Timer? _controllerReadyCheckTimer;
 
+  /// Thumbnail covers the frame while buffering; delay spinner (Instagram-style).
+  Timer? _loadingSpinnerDelayTimer;
+  bool _showLoadingSpinner = false;
+  static const Duration _kLoadingSpinnerDelay = Duration(milliseconds: 450);
+
   // Track if we've received valid video dimensions
   bool _hasValidVideoSize = false;
 
@@ -160,7 +173,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       _videoPlayerController != null &&
       _videoPlayerController!.isInitialized &&
       !_videoPlayerController!.isDisposed &&
-      (_hasPlayed || _videoPlayerController!.position.inMilliseconds > 0);
+      (_hasPlayed ||
+          _videoPlayerController!.position.inMilliseconds > 0 ||
+          (!widget.isPreloaded && !widget.warmDecoderWhilePreloaded));
 
   bool get _parentWantsVisible => widget.isParentVisible?.call() ?? true;
 
@@ -232,7 +247,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       }
     };
     _preloadedReleaseHandler = () {
-      if (!_isDisposed && widget.isPreloaded) {
+      if (!_isDisposed &&
+          widget.isPreloaded &&
+          !widget.warmDecoderWhilePreloaded) {
         releaseControllerMemory();
       }
     };
@@ -283,7 +300,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   /// Current (non-preloaded) slots may init immediately; preloaded stay cold.
   bool get _shouldInitializeOnMount {
     if (widget.initialHandoff != null) return true;
-    if (widget.isPreloaded && !widget.visibilityManagedByParent) return false;
+    if (widget.isPreloaded && !widget.visibilityManagedByParent) {
+      return widget.warmDecoderWhilePreloaded;
+    }
     if (widget.visibilityManagedByParent && !_parentWantsVisible) return false;
     return _mayInitializeDecoder;
   }
@@ -301,9 +320,62 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       return false;
     }
     if (widget.isPreloaded && !widget.visibilityManagedByParent) {
-      return false;
+      return widget.warmDecoderWhilePreloaded;
     }
     return true;
+  }
+
+  void _scheduleLoadingSpinnerIfNeeded() {
+    _loadingSpinnerDelayTimer?.cancel();
+    _showLoadingSpinner = widget.thumbnailUrl.trim().isEmpty;
+    if (_showLoadingSpinner) return;
+    _showLoadingSpinner = false;
+    _loadingSpinnerDelayTimer = Timer(_kLoadingSpinnerDelay, () {
+      if (!mounted || _isDisposed || _shouldShowVideoSurface) return;
+      setState(() => _showLoadingSpinner = true);
+    });
+  }
+
+  void _clearLoadingSpinner() {
+    _loadingSpinnerDelayTimer?.cancel();
+    if (_showLoadingSpinner && mounted) {
+      setState(() => _showLoadingSpinner = false);
+    }
+    _showLoadingSpinner = false;
+  }
+
+  void _scheduleInitRetry(
+    int generation, {
+    required String reason,
+    int delayMs = 1000,
+  }) {
+    if (!_isVisible || !_feedAllowsPlayback || !mounted) return;
+    if (_initRetryCount >= _kMaxInitRetries) {
+      _clearLoadingSpinner();
+      debugPrint(
+        '⛔ VideoPlayerWidget: init retries exhausted ($reason): ${widget.mediaUrl}',
+      );
+      return;
+    }
+    _initRetryCount++;
+    try {
+      widget.videoCacheManager.forceClearMedia(widget.mediaUrl);
+    } catch (_) {}
+    _memoryReleased = false;
+    debugPrint(
+      '🔄 VideoPlayerWidget: init retry $_initRetryCount/$_kMaxInitRetries ($reason)',
+    );
+    Future<void>.delayed(Duration(milliseconds: delayMs), () {
+      if (!_isDisposed &&
+          generation == _initGeneration &&
+          _isVisible &&
+          _feedAllowsPlayback &&
+          _mayInitializeDecoder &&
+          !_isInitialized) {
+        _isInitializing = false;
+        _initializeVideoPlayer();
+      }
+    });
   }
 
   void _adoptWarmControllerIfCached() {
@@ -584,6 +656,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
     final generation = ++_initGeneration;
     _isInitializing = true;
+    _scheduleLoadingSpinnerIfNeeded();
 
     // A warm controller is already on screen. Don't rebuild into the loader.
     if (_videoPlayerController == null && mounted) {
@@ -654,6 +727,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           return;
         }
         if (mounted) {
+          _initRetryCount = 0;
+          _clearLoadingSpinner();
           setState(() {
             _isInitialized = true;
           });
@@ -663,40 +738,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       } else {
         debugPrint(
             '⚠️ VideoPlayerWidget: Failed to initialize video: ${widget.mediaUrl}');
-        // If visible and playback is allowed, schedule a retry
-        if (_isVisible && _feedAllowsPlayback && mounted) {
-          debugPrint(
-              '🔄 VideoPlayerWidget: Scheduling retry for visible video...');
-          Future.delayed(const Duration(seconds: 1), () {
-            if (!_isDisposed &&
-                generation == _initGeneration &&
-                _isVisible &&
-                _feedAllowsPlayback &&
-                _mayInitializeDecoder &&
-                !_isInitialized) {
-              _isInitializing = false;
-              _initializeVideoPlayer();
-            }
-          });
-        }
+        _scheduleInitRetry(generation, reason: 'not_initialized');
       }
     } catch (e) {
       debugPrint('❌ VideoPlayerWidget: Error initializing video: $e');
-      // If visible, schedule a retry on error
-      if (_isVisible && _feedAllowsPlayback && mounted) {
-        debugPrint('🔄 VideoPlayerWidget: Scheduling retry after error...');
-        Future.delayed(const Duration(seconds: 2), () {
-          if (!_isDisposed &&
-              generation == _initGeneration &&
-              _isVisible &&
-              _feedAllowsPlayback &&
-              _mayInitializeDecoder &&
-              !_isInitialized) {
-            _isInitializing = false;
-            _initializeVideoPlayer();
-          }
-        });
-      }
+      _scheduleInitRetry(generation, reason: 'error', delayMs: 2000);
     } finally {
       if (generation == _initGeneration) {
         _isInitializing = false;
@@ -1546,9 +1592,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     if (widget.visibilityManagedByParent) {
       return _effectiveVisible;
     }
-    // A preloaded (non-current) reel must never force-play; otherwise a scoped
-    // play event would resume both the current reel and the preloaded next one.
-    if (widget.isPreloaded) return _isVisible;
+    // Warm-ahead / preloaded slots never autoplay unless [forceResume] marks active.
+    if (widget.isPreloaded && !activeReel) return false;
     return _isVisible || activeReel;
   }
 
@@ -1762,6 +1807,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       _hasPlayed = false;
       _isInitialized = false;
       _isInitializing = false;
+      _initRetryCount = 0;
       _initGeneration++;
       _releaseBoundController(url: oldUrl, controller: oldController);
       if (_mayInitializeDecoder) {
@@ -1769,8 +1815,25 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       }
     }
 
-    // Became preloaded (scrolled away as adjacent) — drop decoder.
+    // Became preloaded (scrolled away) — drop decoder unless still warm-ahead.
     if (!oldWidget.isPreloaded &&
+        widget.isPreloaded &&
+        !widget.warmDecoderWhilePreloaded &&
+        !widget.visibilityManagedByParent) {
+      releaseControllerMemory();
+    }
+
+    if (!oldWidget.warmDecoderWhilePreloaded &&
+        widget.warmDecoderWhilePreloaded &&
+        widget.isPreloaded &&
+        !widget.visibilityManagedByParent &&
+        !_isInitialized &&
+        _mayInitializeDecoder) {
+      _initializeVideoPlayer();
+    }
+
+    if (oldWidget.warmDecoderWhilePreloaded &&
+        !widget.warmDecoderWhilePreloaded &&
         widget.isPreloaded &&
         !widget.visibilityManagedByParent) {
       releaseControllerMemory();
@@ -1812,6 +1875,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _stopProgressUiTimer();
     _stopStuckVideoDetection();
     _controllerReadyCheckTimer?.cancel();
+    _loadingSpinnerDelayTimer?.cancel();
 
     if (widget.isHandoffReceiver) {
       _returnHandoffToFeed();
@@ -1956,6 +2020,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                     children: [
                       _buildThumbnailWidget(context),
                       if (!_controllerHandedOff &&
+                          _showLoadingSpinner &&
                           (_isInitializing ||
                               (_effectiveVisible && !_isInitialized)))
                         const Center(
