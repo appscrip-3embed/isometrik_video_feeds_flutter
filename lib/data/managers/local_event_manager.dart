@@ -114,12 +114,9 @@ class LocalEventQueue with WidgetsBindingObserver {
   LocalEventQueue();
 
   static const _boxName = 'isometrik_social_local_events';
-  static const _batchSize = 10;
-  static const _batchTimerDuration =
-      IsrAppConstants.impressionDataApiLogTimeDuration; // need to change to 10 mins
+  static const _batchSize = IsrAppConstants.postViewImpressionBatchSize;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
-  Timer? _batchTimer;
   bool _isSending = false;
   bool _sendAgainAfterCurrent = false;
 
@@ -146,7 +143,7 @@ class LocalEventQueue with WidgetsBindingObserver {
     await _connectivitySubscription?.cancel();
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((status) async {
       if (!status.contains(ConnectivityResult.none)) {
-        await sendPendingEventsToBackend();
+        await sendPendingEventsToBackend(forcePartialFlush: true);
       }
     });
   }
@@ -157,7 +154,7 @@ class LocalEventQueue with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      sendPendingEventsToBackend();
+      sendPendingEventsToBackend(forcePartialFlush: true);
     }
   }
 
@@ -185,9 +182,7 @@ class LocalEventQueue with WidgetsBindingObserver {
             '${runtimeType.toString()}:Event Name: $eventName added with\n Event Data : ${jsonEncode(payload)}');
         if (box.length >= _batchSize) {
           await sendPendingEventsToBackend();
-          return;
         }
-        _scheduleBatchTimerIfNeeded();
       }
     } catch (e, stackTrace) {
       debugPrint('LocalEventQueue.addEvent: Error adding event: $e');
@@ -203,25 +198,6 @@ class LocalEventQueue with WidgetsBindingObserver {
       debugPrint('LocalEventQueue.addEvent: Box opened successfully');
     }
     return Hive.box<LocalEvent>(_boxName);
-  }
-
-  void _scheduleBatchTimerIfNeeded() {
-    if (_batchTimer != null) return;
-    final box = Hive.isBoxOpen(_boxName) ? Hive.box<LocalEvent>(_boxName) : null;
-    if (box == null || box.isEmpty) return;
-
-    _batchTimer = Timer(_batchTimerDuration, () {
-      _batchTimer = null;
-      sendPendingEventsToBackend();
-    });
-    debugPrint(
-      '${runtimeType.toString()}: Started ${_batchTimerDuration.inMinutes}-min batch timer',
-    );
-  }
-
-  void _cancelBatchTimer() {
-    _batchTimer?.cancel();
-    _batchTimer = null;
   }
 
   final _rudderIncludedEvents = [
@@ -294,7 +270,12 @@ class LocalEventQueue with WidgetsBindingObserver {
     }
   }
 
-  Future<void> sendPendingEventsToBackend() async {
+  /// Sends queued post-view impressions to `/api/v1/views`.
+  ///
+  /// By default only POSTs when the queue has at least [_batchSize] events; each
+  /// request contains exactly [_batchSize] items until fewer remain. Set
+  /// [forcePartialFlush] on lifecycle/connectivity to drain a smaller queue.
+  Future<void> sendPendingEventsToBackend({bool forcePartialFlush = false}) async {
     if (_isSending) {
       _sendAgainAfterCurrent = true;
       return;
@@ -304,7 +285,6 @@ class LocalEventQueue with WidgetsBindingObserver {
     try {
       do {
         _sendAgainAfterCurrent = false;
-        _cancelBatchTimer();
 
         if (!Hive.isBoxOpen(_boxName)) {
           debugPrint('${runtimeType.toString()}: Box not open, opening now...');
@@ -314,15 +294,26 @@ class LocalEventQueue with WidgetsBindingObserver {
         final events = box.values.toList();
         if (events.isEmpty) break;
 
-        final sentEventIds = events.map((e) => e.id).toList();
-        final eventPayLoadList = events.map((e) => e.payload).toList();
+        if (!forcePartialFlush && events.length < _batchSize) {
+          debugPrint(
+            '${runtimeType.toString()}: ${events.length}/$_batchSize post views queued — waiting for full batch',
+          );
+          break;
+        }
+
+        final sendCount = forcePartialFlush
+            ? events.length
+            : (events.length >= _batchSize ? _batchSize : events.length);
+        final batch = events.take(sendCount).toList();
+        final sentEventIds = batch.map((e) => e.id).toList();
+        final eventPayLoadList = batch.map((e) => e.payload).toList();
 
         try {
           _talker?.info(
-              '${runtimeType.toString()}: Sending ${events.length} event(s) -> $eventPayLoadList');
+              '${runtimeType.toString()}: Sending ${batch.length} event(s) -> $eventPayLoadList');
           final socialPostBloc = IsmInjectionUtils.getBloc<SocialPostBloc>();
           debugPrint(
-              '${runtimeType.toString()}: API Call Init -> count: ${events.length}, payload:- $eventPayLoadList');
+              '${runtimeType.toString()}: API Call Init -> count: ${batch.length}, payload:- $eventPayLoadList');
           final result = await socialPostBloc.sendEventsToBackend(eventPayLoadList);
           _talker?.info(
               '${runtimeType.toString()}: Sending Event -> Event result status : ${result.statusCode}, isSuccess: ${result.isSuccess}, errorIfAny: ${result.error?.message}');
@@ -340,9 +331,11 @@ class LocalEventQueue with WidgetsBindingObserver {
           );
           break;
         }
-      } while (_sendAgainAfterCurrent);
 
-      _scheduleBatchTimerIfNeeded();
+        if (!forcePartialFlush && box.length >= _batchSize) {
+          _sendAgainAfterCurrent = true;
+        }
+      } while (_sendAgainAfterCurrent);
     } finally {
       _isSending = false;
     }
@@ -369,7 +362,6 @@ class LocalEventQueue with WidgetsBindingObserver {
 
   /// cleanup
   void dispose() {
-    _cancelBatchTimer();
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
     WidgetsBinding.instance.removeObserver(this);

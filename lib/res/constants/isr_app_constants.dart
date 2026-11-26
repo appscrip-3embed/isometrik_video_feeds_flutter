@@ -55,7 +55,8 @@ class IsrAppConstants {
   static const int minImagePostDurationSeconds = 3;
   static const int maxImagePostDurationSeconds = 15;
   static const int scheduleMinAdvanceMinutes = 30;
-  static const Duration impressionDataApiLogTimeDuration = Duration(minutes: 10);
+  /// Queue depth before [LocalEventQueue] POSTs `/api/v1/views` (see `local_event_manager`).
+  static const int postViewImpressionBatchSize = 10;
   static const bool convertHlsPostMediaToImageMedia = false;
 
   static const List<String> restrictedWords = [
