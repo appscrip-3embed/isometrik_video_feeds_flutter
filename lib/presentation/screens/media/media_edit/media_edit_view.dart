@@ -14,6 +14,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/pro_media_editor/pro_video_editor_wrapper.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/widgets/media_edit_widgets.dart';
 import 'package:ism_video_reel_player/res/res.dart';
+import 'package:ism_video_reel_player/presentation/screens/widgets/isr_processing_overlay.dart';
 import 'package:ism_video_reel_player/utils/isr_image_sound_registry.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
 import 'package:path_provider/path_provider.dart';
@@ -491,15 +492,20 @@ class _MediaEditViewState extends State<MediaEditView>
                               _buildBottomSection(state),
                             ],
                           ),
-                          if (state.isApplyingSound)
+                          if (state.isApplyingSound || state.isProcessingNext)
                             Positioned.fill(
-                              child: ColoredBox(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: widget.mediaEditConfig.primaryColor,
-                                  ),
-                                ),
+                              child: IsrProcessingOverlay(
+                                title: state.isProcessingNext
+                                    ? IsrTranslationFile.preparingNewPost
+                                    : IsrTranslationFile.applyingSoundTitle,
+                                subtitle: state.isProcessingNext
+                                    ? IsrTranslationFile.preparingNewPostSubtitle
+                                    : IsrTranslationFile.applyingSoundSubtitle,
+                                primaryColor: widget.mediaEditConfig.primaryColor,
+                                textColor: widget.mediaEditConfig.primaryTextColor,
+                                backgroundColor: widget.mediaEditConfig.whiteColor,
+                                fontFamily: widget.mediaEditConfig.primaryFontFamily,
+                                lottieAsset: AssetConstants.postUploadedAnimation,
                               ),
                             ),
                         ],
@@ -797,8 +803,12 @@ class _MediaEditViewState extends State<MediaEditView>
             const SizedBox(width: 16),
 
             // Next button
-            GestureDetector(
-              onTap: () => _bloc.add(ProceedToNextEvent()),
+            Opacity(
+              opacity: state.isProcessingNext || state.isApplyingSound ? 0.45 : 1,
+              child: GestureDetector(
+              onTap: state.isProcessingNext || state.isApplyingSound
+                  ? null
+                  : () => _bloc.add(ProceedToNextEvent()),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
@@ -824,6 +834,7 @@ class _MediaEditViewState extends State<MediaEditView>
                   ],
                 ),
               ),
+            ),
             ),
           ],
         ),

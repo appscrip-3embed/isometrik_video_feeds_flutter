@@ -311,6 +311,9 @@ class CreatePostBloc extends Bloc<CreatePostEvent, CreatePostState> {
       sound: event.selectedSound,
       request: _createPostRequest,
     );
+    emit(PostAttributionPreparingState(
+      message: IsrTranslationFile.preparingNewPostSubtitle,
+    ));
     final postAttribution = await preparePostAttribution(newMediaDataList: event.newMediaDataList);
     emit(PostAttributionUpdatedState(postAttributeClass: postAttribution));
   }

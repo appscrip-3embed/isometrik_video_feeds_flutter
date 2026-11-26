@@ -10,6 +10,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:fluttertagger/fluttertagger.dart';
 import 'package:ism_video_reel_player/ism_video_reel_player.dart';
 import 'package:ism_video_reel_player/presentation/screens/create_post/add_post_link_sheet.dart';
+import 'package:ism_video_reel_player/presentation/screens/widgets/isr_processing_overlay.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_capture/camera.dart' as mc;
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_audio_model.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_selection/media_selection.dart'
@@ -88,6 +89,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
 
   bool _isDialogOpen = false;
   bool _createFlowDismissed = false;
+  bool _isPreparingPostPage = false;
+  double? _compressionProgress;
 
   // Schedule post variables - sync with bloc
   late final CreatePostBloc _createPostBloc;
@@ -161,6 +164,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
         isRejectedResubmit: widget.isRejectedResubmit,
       ));
     } else if (!_isEditMode && widget.newMediaDataList?.isNotEmpty == true) {
+      _isPreparingPostPage = true;
       _createPostBloc.add(CreatePostInitialEvent(
         newMediaDataList: widget.newMediaDataList,
         selectedSound: widget.selectedSound,
@@ -189,7 +193,21 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
       state is DismissCreatePostFlowForBackgroundState;
 
   void _onCreatePostBlocState(CreatePostState state) {
-    if (!mounted || !_shouldReactToCreatePostState(state)) return;
+    if (!mounted) return;
+
+    if (state is PostAttributionPreparingState) {
+      setState(() {
+        _isPreparingPostPage = true;
+        _compressionProgress = null;
+      });
+      return;
+    }
+    if (state is CompressionProgressState) {
+      setState(() => _compressionProgress = state.progress);
+      return;
+    }
+
+    if (!_shouldReactToCreatePostState(state)) return;
 
     if (state is DismissCreatePostFlowForBackgroundState && _useBackgroundPostUi) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -200,6 +218,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     }
     if (state is PostAttributionUpdatedState && state.postAttributeClass != null) {
       setState(() {
+        _isPreparingPostPage = false;
+        _compressionProgress = null;
         _prepareData(postAttributeClass: state.postAttributeClass);
       });
     }
@@ -692,8 +712,30 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     return true;
   }
 
+  Color get _overlayPrimaryColor =>
+      _postAttributeConfig?.postButtonConfig?.backgroundColor ??
+      Theme.of(context).primaryColor;
+
   @override
-  Widget build(BuildContext context) => _buildPage();
+  Widget build(BuildContext context) => Stack(
+        children: [
+          _buildPage(),
+          if (_isPreparingPostPage)
+            IsrProcessingOverlay(
+              title: IsrTranslationFile.preparingNewPost,
+              subtitle: IsrTranslationFile.preparingNewPostSubtitle,
+              primaryColor: _overlayPrimaryColor,
+              textColor:
+                  _postAttributeConfig?.appBarConfig?.titleStyle?.color ??
+                  IsrColors.primaryTextColor,
+              backgroundColor:
+                  _postAttributeConfig?.scaffoldBackgroundColor ?? Colors.white,
+              fontFamily: IsrAppConstants.primaryFontFamily,
+              progress: _compressionProgress,
+              lottieAsset: AssetConstants.postUploadedAnimation,
+            ),
+        ],
+      );
 
   Widget _buildPage() => Scaffold(
         backgroundColor: _postAttributeConfig?.scaffoldBackgroundColor ?? Colors.white,

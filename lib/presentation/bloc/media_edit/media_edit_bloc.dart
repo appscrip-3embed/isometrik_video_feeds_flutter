@@ -434,27 +434,40 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     ProceedToNextEvent event,
     Emitter<MediaEditState> emit,
   ) async {
-    final useCarousel =
-        PostSoundUtil.useCarouselPostSoundOverlayForEditItems(_mediaEditItems);
-    if (!useCarousel) {
-      for (var i = 0; i < _mediaEditItems.length; i++) {
-        final item = _mediaEditItems[i];
-        final sound = item.sound;
-        if (item.mediaType != EditMediaType.video ||
-            sound == null ||
-            sound.soundUrl?.trim().isEmpty == true) {
-          continue;
+    emit(MediaEditLoadedState(
+      mediaEditItems: List.from(_mediaEditItems),
+      currentIndex: _currentIndex,
+      isProcessingNext: true,
+    ));
+
+    try {
+      final useCarousel =
+          PostSoundUtil.useCarouselPostSoundOverlayForEditItems(_mediaEditItems);
+      if (!useCarousel) {
+        for (var i = 0; i < _mediaEditItems.length; i++) {
+          final item = _mediaEditItems[i];
+          final sound = item.sound;
+          if (item.mediaType != EditMediaType.video ||
+              sound == null ||
+              sound.soundUrl?.trim().isEmpty == true) {
+            continue;
+          }
+          final path = item.editedPath ?? item.originalPath;
+          final muxed = await PostSoundUtil.muxVideoWithSound(
+            videoPath: path,
+            sound: sound,
+            showLoader: false,
+          );
+          _mediaEditItems[i] = item.copyWith(editedPath: muxed);
         }
-        final path = item.editedPath ?? item.originalPath;
-        final muxed = await PostSoundUtil.muxVideoWithSound(
-          videoPath: path,
-          sound: sound,
-          showLoader: false,
-        );
-        _mediaEditItems[i] = item.copyWith(editedPath: muxed);
       }
+      emit(MediaEditCompletedState(mediaEditItems: List.from(_mediaEditItems)));
+    } catch (_) {
+      emit(MediaEditLoadedState(
+        mediaEditItems: List.from(_mediaEditItems),
+        currentIndex: _currentIndex,
+      ));
     }
-    emit(MediaEditCompletedState(mediaEditItems: List.from(_mediaEditItems)));
   }
 
   int? get pendingRemoveIndex => _pendingRemoveIndex;

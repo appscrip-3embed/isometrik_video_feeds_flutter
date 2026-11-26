@@ -127,6 +127,12 @@ class MentionedUsersUpdatedState extends CreatePostState {
   final List<TaggedPlace> locationTags;
 }
 
+class PostAttributionPreparingState extends CreatePostState {
+  PostAttributionPreparingState({this.message});
+
+  final String? message;
+}
+
 class PostAttributionUpdatedState extends CreatePostState {
   PostAttributionUpdatedState({
     this.postAttributeClass,

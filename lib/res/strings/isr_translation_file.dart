@@ -219,6 +219,15 @@ class IsrTranslationFile {
   static String get postDetailsScheduledForLabel =>
       isrTr('postDetailsScheduledForLabel');
   static String get processing => isrTr('processing');
+  static String get applyingSoundTitle => isrTr('applyingSoundTitle');
+  static String get applyingSoundSubtitle => isrTr('applyingSoundSubtitle');
+  static String get preparingNewPost => isrTr('preparingNewPost');
+  static String get preparingNewPostSubtitle =>
+      isrTr('preparingNewPostSubtitle');
+  static String get soundPreviewLoadingTitle =>
+      isrTr('soundPreviewLoadingTitle');
+  static String get soundPreviewLoadingSubtitle =>
+      isrTr('soundPreviewLoadingSubtitle');
   static String get postDetailsRejectedReplaceInstruction =>
       isrTr('postDetailsRejectedReplaceInstruction');
   static String get postDetailsPostRejectedTitle =>

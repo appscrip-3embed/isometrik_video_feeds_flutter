@@ -13,11 +13,15 @@ class MediaEditLoadedState extends MediaEditState {
     required this.mediaEditItems,
     required this.currentIndex,
     this.isApplyingSound = false,
+    this.isProcessingNext = false,
   });
 
   final List<MediaEditItem> mediaEditItems;
   final int currentIndex;
   final bool isApplyingSound;
+
+  /// Mux / finalize before opening the post screen.
+  final bool isProcessingNext;
 }
 
 class MediaEditErrorState extends MediaEditState {

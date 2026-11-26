@@ -196,6 +196,12 @@ const Map<String, String> kIsrTrFallback = {
   'postDetailsRejectedOnLabel': 'Rejected',
   'postDetailsScheduledForLabel': 'Scheduled for',
   'processing': 'Processing',
+  'applyingSoundTitle': 'Mixing your sound',
+  'applyingSoundSubtitle': 'Syncing audio with your video…',
+  'preparingNewPost': 'Almost there',
+  'preparingNewPostSubtitle': 'Preparing your video for upload…',
+  'soundPreviewLoadingTitle': 'Loading preview',
+  'soundPreviewLoadingSubtitle': 'Getting your track ready to play…',
   'postDetailsRejectedReplaceInstruction':
       'Replace or remove the flagged items below, then resubmit. Your approved items are untouched.',
   'reason': 'Reason',
