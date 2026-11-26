@@ -4,6 +4,7 @@ export 'app_mixin.dart';
 export 'audio_source_util.dart';
 export 'camera_gallery_sound_util.dart';
 export 'caption_link_utils.dart';
+export 'create_post_cover_still_util.dart';
 export 'date_time_util.dart';
 export 'debouncer.dart';
 export 'enums.dart';

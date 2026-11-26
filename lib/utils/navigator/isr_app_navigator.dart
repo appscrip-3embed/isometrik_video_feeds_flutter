@@ -860,21 +860,19 @@ class IsrAppNavigator {
     List<MentionData>? mentionDataList,
     List<MediaData>? mediaDataList,
     String? postId,
+    String? postCoverStillPath,
     TransitionType? transitionType,
   }) async {
     debugPrint(
         'goToTagPeopleScreen:- MentionDataList: ${mentionDataList?.map((e) => e.toJson()).toList()}');
-    final page = MultiBlocProvider(
-      providers: [
-        BlocProvider.value(value: context.getOrCreateBloc<CreatePostBloc>()),
-        BlocProvider.value(value: context.getOrCreateBloc<SearchUserBloc>()),
-        BlocProvider.value(value: context.getOrCreateBloc<UploadProgressCubit>()),
-      ],
-      child: TagPeopleScreen(
-        mentionDataList: mentionDataList ?? [],
-        mediaDataList: mediaDataList ?? [],
-        postId: postId,
-      ),
+    // Avoid nested [BlocProvider.value] on overlay routes — popping while widgets
+    // still depend on them triggers `_dependents.isEmpty` on create post return.
+    // Tag/search screens resolve blocs via [BlocSafeGetter.getOrCreateBloc] (DI).
+    final page = TagPeopleScreen(
+      mentionDataList: mentionDataList ?? [],
+      mediaDataList: mediaDataList ?? [],
+      postId: postId,
+      postCoverStillPath: postCoverStillPath,
     );
 
     final result = await Navigator.of(context, rootNavigator: true).push<List<MentionData>?>(
@@ -918,16 +916,9 @@ class IsrAppNavigator {
     int? maxSelectablePeople,
     TransitionType? transitionType,
   }) async {
-    final page = MultiBlocProvider(
-      providers: [
-        BlocProvider.value(value: context.getOrCreateBloc<CreatePostBloc>()),
-        BlocProvider.value(value: context.getOrCreateBloc<SearchUserBloc>()),
-        BlocProvider.value(value: context.getOrCreateBloc<UploadProgressCubit>()),
-      ],
-      child: SearchUserView(
-        socialUserList: socialUserList ?? [],
-        maxSelectablePeople: maxSelectablePeople,
-      ),
+    final page = SearchUserView(
+      socialUserList: socialUserList ?? [],
+      maxSelectablePeople: maxSelectablePeople,
     );
 
     final result = await Navigator.of(context, rootNavigator: true).push<List<SocialUserData>?>(

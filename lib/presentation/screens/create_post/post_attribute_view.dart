@@ -89,12 +89,9 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   bool _isDialogOpen = false;
   bool _createFlowDismissed = false;
 
-  // Throttle post-button updates when returning from other screens to reduce transition jank
-  static const _postButtonUpdateThrottleMs = 150;
-  int _lastPostButtonUpdateMs = 0;
-
   // Schedule post variables - sync with bloc
   late final CreatePostBloc _createPostBloc;
+  StreamSubscription<CreatePostState>? _createPostBlocSub;
   late final UploadProgressCubit _progressCubit;
   late final IsmSocialActionCubit _socialActionCubit;
 
@@ -176,7 +173,96 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
         _performScrollToCaptionInput();
       }
     });
+    _bindCreatePostBlocListener();
     super.initState();
+  }
+
+  void _bindCreatePostBlocListener() {
+    _createPostBlocSub?.cancel();
+    _createPostBlocSub = _createPostBloc.stream.listen(_onCreatePostBlocState);
+  }
+
+  bool _shouldReactToCreatePostState(CreatePostState state) =>
+      state is PostCreatedState ||
+      state is ShowProgressDialogState ||
+      state is PostAttributionUpdatedState ||
+      state is DismissCreatePostFlowForBackgroundState;
+
+  void _onCreatePostBlocState(CreatePostState state) {
+    if (!mounted || !_shouldReactToCreatePostState(state)) return;
+
+    if (state is DismissCreatePostFlowForBackgroundState && _useBackgroundPostUi) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _popNavigatorStackForBackgroundPost(result: null);
+      });
+      return;
+    }
+    if (state is PostAttributionUpdatedState && state.postAttributeClass != null) {
+      setState(() {
+        _prepareData(postAttributeClass: state.postAttributeClass);
+      });
+    }
+    if (state is PostCreatedState) {
+      if (_useBackgroundPostUi) {
+        _doMediaCaching(state.mediaDataList);
+        if (!_createFlowDismissed) {
+          _popNavigatorStackForBackgroundPost(
+            result: widget.isRejectedResubmit ? true : state.postDataModel,
+          );
+        }
+        return;
+      }
+      if (!widget.isRejectedResubmit && widget.isEditMode == true) {
+        _socialActionCubit.onPostEdited(
+            postId: state.postDataModel?.id, postData: state.postDataModel);
+      } else if (!widget.isRejectedResubmit) {
+        _socialActionCubit.onPostCreated(postId: state.postDataModel?.id);
+      }
+      final postData = state.postDataModel;
+      final flowResult = widget.isRejectedResubmit ? true : postData;
+      Utility.showBottomSheet(
+        child: _buildSuccessBottomSheet(
+          onTapBack: () => _leaveCreateFlow(result: flowResult),
+          title: state.postSuccessTitle ?? '',
+          message: state.postSuccessMessage ?? '',
+        ),
+        isDismissible: false,
+      );
+      _doMediaCaching(state.mediaDataList);
+      Future.delayed(const Duration(seconds: 2), () async {
+        if (!mounted) return;
+        Navigator.pop(context);
+        if (!mounted) return;
+        _leaveCreateFlow(result: flowResult);
+      });
+    }
+    if (state is ShowProgressDialogState && !_useBackgroundPostUi) {
+      if (!_isDialogOpen) {
+        _isDialogOpen = true;
+        _showProgressDialog(state.title ?? '', state.subTitle ?? '');
+      } else {
+        if (state.isAllFilesUploaded) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (_isDialogOpen) {
+              _isDialogOpen = false;
+              Navigator.pop(context);
+            }
+          });
+        }
+      }
+      _progressCubit.updateProgress(state.progress ?? 0);
+      _progressCubit.updateTitle(state.title ?? IsrTranslationFile.uploadingMediaFiles);
+      _progressCubit.updateSubtitle(state.subTitle ?? '');
+      _progressCubit.updateIsError(state.isErrorUploading);
+    }
+  }
+
+  void _refreshAfterChildRoute() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _updatePostButtonState();
+    });
   }
 
   void _prepareData({PostAttributeClass? postAttributeClass}) {
@@ -233,11 +319,20 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     // Initialize button state
     _updatePostButtonState();
 
-    for (var mediaData in _mediaDataList) {
-      if (mediaData.mediaType?.mediaType == MediaType.video) {
-        initializeVideoPlayer(mediaData);
-      }
+    // Media carousel preview is disabled on this screen; do not open [VideoPlayer]
+    // on the same local path used by Tag People (causes pop crash on video reels).
+  }
+
+  /// Drops hidden post-attribute video decoders before pushing Tag People.
+  Future<void> _releaseVideoControllersForChildRoute() async {
+    for (final controller in _videoControllers.values) {
+      try {
+        await controller.pause();
+        await controller.dispose();
+      } catch (_) {}
     }
+    _videoControllers.clear();
+    _videoInitializingStates.clear();
   }
 
   /// Method For Initialize Video Player
@@ -310,6 +405,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_createPostBlocSub?.cancel());
+    _createPostBlocSub = null;
     _descriptionController.dispose();
     _paidAmountController.dispose();
     _scrollController.dispose();
@@ -596,100 +693,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   }
 
   @override
-  Widget build(BuildContext context) {
-    // Throttled update when user returns from other screens to avoid jank during transition
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _lastPostButtonUpdateMs >= _postButtonUpdateThrottleMs) {
-        _lastPostButtonUpdateMs = now;
-        _updatePostButtonState();
-      }
-    });
-
-    final page = BlocListener<CreatePostBloc, CreatePostState>(
-      listenWhen: (previousState, currentState) =>
-          currentState is PostCreatedState ||
-          currentState is ShowProgressDialogState ||
-          currentState is PostAttributionUpdatedState ||
-          currentState is DismissCreatePostFlowForBackgroundState,
-      listener: (context, state) {
-        if (state is DismissCreatePostFlowForBackgroundState && _useBackgroundPostUi) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _popNavigatorStackForBackgroundPost(result: null);
-          });
-          return;
-        }
-        if (state is PostAttributionUpdatedState && state.postAttributeClass != null) {
-          setState(() {
-            _prepareData(postAttributeClass: state.postAttributeClass);
-          });
-        }
-        if (state is PostCreatedState) {
-          if (_useBackgroundPostUi) {
-            if (!mounted) return;
-            _doMediaCaching(state.mediaDataList);
-            if (!_createFlowDismissed) {
-              _popNavigatorStackForBackgroundPost(
-                result: widget.isRejectedResubmit ? true : state.postDataModel,
-              );
-            }
-            return;
-          }
-          if (!widget.isRejectedResubmit && widget.isEditMode == true) {
-            _socialActionCubit.onPostEdited(
-                postId: state.postDataModel?.id, postData: state.postDataModel);
-          } else if (!widget.isRejectedResubmit) {
-            _socialActionCubit.onPostCreated(postId: state.postDataModel?.id);
-          }
-          final postData = state.postDataModel;
-          final flowResult = widget.isRejectedResubmit ? true : postData;
-          Utility.showBottomSheet(
-            child: _buildSuccessBottomSheet(
-              onTapBack: () => _leaveCreateFlow(result: flowResult),
-              title: state.postSuccessTitle ?? '',
-              message: state.postSuccessMessage ?? '',
-            ),
-            isDismissible: false,
-          );
-          _doMediaCaching(state.mediaDataList);
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (!mounted) return;
-            Navigator.pop(context);
-            if (!mounted) return;
-            _leaveCreateFlow(result: flowResult);
-          });
-        }
-        if (state is ShowProgressDialogState && !_useBackgroundPostUi) {
-          if (!_isDialogOpen) {
-            _isDialogOpen = true;
-            _showProgressDialog(state.title ?? '', state.subTitle ?? '');
-          } else {
-            if (state.isAllFilesUploaded) {
-              // Show success animation
-              // _progressCubit.showSuccess();
-              // Dismiss after 3 seconds
-              Future.delayed(const Duration(milliseconds: 300), () {
-                if (_isDialogOpen) {
-                  _isDialogOpen = false;
-                  Navigator.pop(context);
-                }
-              });
-            }
-          }
-          // Update all cubit state values
-          _progressCubit.updateProgress(state.progress ?? 0);
-          _progressCubit.updateTitle(state.title ?? IsrTranslationFile.uploadingMediaFiles);
-          _progressCubit.updateSubtitle(state.subTitle ?? '');
-          _progressCubit.updateIsError(state.isErrorUploading);
-        }
-      },
-      child: _buildPage(),
-    );
-
-    return page;
-  }
+  Widget build(BuildContext context) => _buildPage();
 
   Widget _buildPage() => Scaffold(
         backgroundColor: _postAttributeConfig?.scaffoldBackgroundColor ?? Colors.white,
@@ -874,6 +878,8 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
                           title: IsrTranslationFile.tagPeople,
                           onTap: () async {
                             _descriptionFocusNode.unfocus();
+                            _descriptionController.dismissOverlay();
+                            await _releaseVideoControllersForChildRoute();
                             final mediaDataList = _postAttributeClass?.mediaDataList ?? [];
                             final taggedMentionedUsers = _getTaggedUsers();
                             _tagPeopleManagedUserIds = taggedMentionedUsers
@@ -885,12 +891,15 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
                               mentionDataList: taggedMentionedUsers,
                               mediaDataList: mediaDataList,
                               postId: widget.postData?.id,
+                              postCoverStillPath: CreatePostCoverStillUtil
+                                  .fromPostAttribute(_postAttributeClass),
                             );
                             if (result != null) {
-                              _applyTagPeopleScreenResult(
+                              _scheduleTagPeopleResult(
                                 List<MentionData>.from(result),
                               );
-                              _updatePostButtonState();
+                            } else {
+                              _refreshAfterChildRoute();
                             }
                           },
                           trailing: Row(
@@ -1219,6 +1228,18 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
     final username = (mention.username ?? '').replaceFirst('@', '');
     if (username.isEmpty) return false;
     return _descriptionController.text.contains('@$username');
+  }
+
+  /// Waits for Tag People to fully unmount before mutating create-post state.
+  void _scheduleTagPeopleResult(List<MentionData> mediaTags) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _descriptionController.dismissOverlay();
+        _applyTagPeopleScreenResult(mediaTags);
+        _refreshAfterChildRoute();
+      });
+    });
   }
 
   /// Replaces media tags from [TagPeopleScreen] while keeping caption @mentions.

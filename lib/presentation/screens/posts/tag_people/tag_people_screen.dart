@@ -1,5 +1,5 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -8,20 +8,24 @@ import 'package:ism_video_reel_player/isr_video_reel_config.dart';
 import 'package:ism_video_reel_player/presentation/presentation.dart';
 import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
-import 'package:video_player/video_player.dart';
-import 'package:visibility_detector/visibility_detector.dart';
 
+/// Tag-people UI uses **cover/preview stills** for video items — not [VideoPlayer].
+/// Playback on this route conflicted with create-post's hidden controllers on the
+/// same local file and triggered framework errors when popping back (video only).
 class TagPeopleScreen extends StatefulWidget {
   const TagPeopleScreen({
     Key? key,
     required this.mentionDataList,
     required this.mediaDataList,
     this.postId,
+    /// Same still as upload / create-post cover preview ([CreatePostCoverStillUtil]).
+    this.postCoverStillPath,
   }) : super(key: key);
 
   final List<MentionData> mentionDataList;
   final List<MediaData> mediaDataList;
   final String? postId;
+  final String? postCoverStillPath;
 
   @override
   State<TagPeopleScreen> createState() => _TagPeopleScreenState();
@@ -64,11 +68,8 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
       ? IsrColors.primaryTextColor.withValues(alpha: 0.18)
       : '#DBDBDB'.toColor();
 
-  // Video player state
-  final Map<String, VideoPlayerController> _videoControllers = {};
-  final Map<String, bool> _videoInitializingStates = {};
-  final Map<String, bool> _videoVisibilityStates =
-      {}; // Track visibility per video
+  /// Prevents [setState] while the route is tearing down.
+  bool _isRouteClosing = false;
 
   @override
   void initState() {
@@ -87,11 +88,6 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
     }
 
     updateMentionListWithPostMentionListFromAPI();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _syncActiveVideoController(_currentIndex);
-      }
-    });
   }
 
   var _isPostMentionedApiLoading = false;
@@ -118,7 +114,7 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
       postId: widget.postId ?? '',
       page: page,
       onComplete: (userList, hasMore) {
-        if (mounted) {
+        if (mounted && !_isRouteClosing) {
           setState(() {
             for (final user in userList) {
               final mention = _mentionDataList
@@ -138,11 +134,20 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
         }
 
         _isPostMentionedApiLoading = false;
-        if (mounted) {
+        if (mounted && !_isRouteClosing) {
           setState(() {});
         }
       },
     ));
+  }
+
+  Future<void> _popRoute<T>([T? result]) async {
+    if (_isRouteClosing) return;
+    _isRouteClosing = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop<T>(result);
   }
 
   /// Check if the mention data is loading
@@ -156,72 +161,32 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
 
   @override
   void dispose() {
+    _isRouteClosing = true;
     _pageController.dispose();
-    _disposeAllVideoControllers();
     super.dispose();
   }
 
-  String? _videoKeyForMedia(MediaData mediaData) {
-    if (mediaData.localPath?.isNotEmpty == true) {
-      return mediaData.localPath;
-    }
-    if (mediaData.url?.isNotEmpty == true) {
-      return mediaData.url;
-    }
-    return null;
-  }
-
-  void _disposeVideoController(String videoKey) {
-    final controller = _videoControllers.remove(videoKey);
-    _videoInitializingStates.remove(videoKey);
-    _videoVisibilityStates.remove(videoKey);
-    controller?.dispose();
-  }
-
-  void _disposeAllVideoControllers() {
-    for (final controller in _videoControllers.values) {
-      controller.dispose();
-    }
-    _videoControllers.clear();
-    _videoInitializingStates.clear();
-    _videoVisibilityStates.clear();
-  }
-
-  void _syncActiveVideoController(int pageIndex) {
-    final activeKey = pageIndex >= 0 && pageIndex < _mediaDataList.length
-        ? _videoKeyForMedia(_mediaDataList[pageIndex])
-        : null;
-
-    final keysToRemove = _videoControllers.keys
-        .where((key) => key != activeKey)
-        .toList(growable: false);
-    for (final key in keysToRemove) {
-      _disposeVideoController(key);
-    }
-
-    if (pageIndex < 0 || pageIndex >= _mediaDataList.length) return;
-
-    final mediaData = _mediaDataList[pageIndex];
-    if (mediaData.mediaType?.mediaType != MediaType.video &&
-        mediaData.mediaType != 'video') {
-      return;
-    }
-
-    initializeVideoPlayer(mediaData);
-  }
+  bool _isVideoMedia(MediaData mediaData) =>
+      mediaData.mediaType?.mediaType == MediaType.video ||
+      mediaData.mediaType == 'video';
 
   String? _previewImageUrl(MediaData mediaData) {
+    if (_isVideoMedia(mediaData)) {
+      final postCover = widget.postCoverStillPath?.trim();
+      if (postCover != null && postCover.isNotEmpty) return postCover;
+      final onMediaCover = mediaData.coverFileLocalPath?.trim();
+      if (onMediaCover != null && onMediaCover.isNotEmpty) return onMediaCover;
+      final autoPreview = mediaData.previewUrl?.trim();
+      if (autoPreview != null && autoPreview.isNotEmpty) return autoPreview;
+      return null;
+    }
     if (mediaData.previewUrl?.isNotEmpty == true) {
       return mediaData.previewUrl;
     }
     if (mediaData.coverFileLocalPath?.isNotEmpty == true) {
       return mediaData.coverFileLocalPath;
     }
-    if (mediaData.mediaType?.mediaType != MediaType.video &&
-        mediaData.mediaType != 'video') {
-      return _getMediaUrl(mediaData);
-    }
-    return null;
+    return _getMediaUrl(mediaData);
   }
 
   Widget _buildVideoThumbnailPlaceholder(MediaData mediaData) {
@@ -268,82 +233,6 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
     }
     // Return empty string if no valid URL found
     return '';
-  }
-
-  /// Method For Initialize Video Player
-  Future<void> initializeVideoPlayer(MediaData mediaData) async {
-    if (mediaData.mediaType == 'video') {
-      // Determine the video source URL (local or remote)
-      String? videoUrl;
-      String videoKey;
-
-      // Check for local path first (for new uploads)
-      if (mediaData.localPath?.isNotEmpty == true) {
-        videoUrl = mediaData.localPath!;
-        videoKey = videoUrl;
-      }
-      // Check for remote URL (for existing/edited posts)
-      else if (mediaData.url?.isNotEmpty == true) {
-        videoUrl = mediaData.url!;
-        videoKey = videoUrl;
-      } else {
-        // No valid video URL found
-        debugPrint('No valid video URL found for media data');
-        return;
-      }
-
-      // Return if video URL is empty
-      if (videoUrl.isEmpty) {
-        debugPrint('Video URL is empty');
-        return;
-      }
-
-      // Skip if already initialized
-      if (_videoControllers.containsKey(videoKey)) return;
-
-      _videoInitializingStates[videoKey] = true;
-      setState(() {});
-
-      try {
-        VideoPlayerController controller;
-
-        // Check if it's a local file or remote URL
-        if (Utility.isLocalUrl(videoUrl)) {
-          // Local file
-          controller = VideoPlayerController.file(File(videoUrl));
-          debugPrint('Initializing video player for local file: $videoUrl');
-        } else {
-          // Remote URL
-          controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
-          debugPrint('Initializing video player for remote URL: $videoUrl');
-        }
-
-        await controller.initialize();
-        await controller.setLooping(true);
-        await controller.setVolume(1.0);
-
-        _videoControllers[videoKey] = controller;
-        _videoInitializingStates[videoKey] = false;
-        setState(() {});
-
-        debugPrint('Video player initialized successfully for: $videoUrl');
-      } catch (e) {
-        debugPrint('Error initializing video player for $videoUrl: $e');
-        _videoInitializingStates[videoKey] = false;
-        setState(() {});
-      }
-    }
-  }
-
-  /// Play/pause video
-  void _playPause(VideoPlayerController controller) {
-    setState(() {
-      if (controller.value.isPlaying) {
-        controller.pause();
-      } else {
-        controller.play();
-      }
-    });
   }
 
   @override
@@ -412,15 +301,12 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
                             setState(() {
                               _currentIndex = index;
                             });
-                            _syncActiveVideoController(index);
                           },
                           itemCount: _mediaDataList.length,
                           itemBuilder: (context, index) {
                             final mediaData = _mediaDataList[index];
-                            if (mediaData.mediaType == 'video') {
-                              // Get video URL (local or remote)
-                              final videoUrl = _getMediaUrl(mediaData);
-                              return _buildTaggableVideoView(videoUrl, index);
+                            if (_isVideoMedia(mediaData)) {
+                              return _buildTaggableVideoView(mediaData, index);
                             } else {
                               // Get image URL (local or remote)
                               final imageUrl = _getMediaUrl(mediaData);
@@ -871,11 +757,9 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
     );
   }
 
-  Widget _buildTaggableVideoView(String videoUrl, int mediaIndex) {
-    // Ensure we have a unique key for this media index
+  Widget _buildTaggableVideoView(MediaData mediaData, int mediaIndex) {
     _mentionedVideoKeys.putIfAbsent(mediaIndex, GlobalKey.new);
-
-    // Return error container if no valid video URL
+    final videoUrl = _getMediaUrl(mediaData);
     if (videoUrl.isEmpty) {
       return Container(
         color: Colors.black,
@@ -895,129 +779,15 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
       );
     }
 
-    final mediaData = _mediaDataList[mediaIndex];
-    if (mediaIndex != _currentIndex) {
-      return Container(
-        color: Colors.black,
+    return LayoutBuilder(
+      key: _mentionedVideoKeys[mediaIndex],
+      builder: (context, constraints) => GestureDetector(
+        onTapUp: (TapUpDetails details) {
+          // _handleVideoTap(details, constraints, mediaIndex);
+        },
         child: _buildVideoThumbnailPlaceholder(mediaData),
-      );
-    }
-
-    // Use the same key logic as in initializeVideoPlayer
-    final videoKey = videoUrl;
-    final isInitializing = _videoInitializingStates[videoKey] ?? false;
-    final controller = _videoControllers[videoKey];
-
-    if (isInitializing) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
-    }
-
-    if (controller == null || !controller.value.isInitialized) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.videocam, size: 64, color: Colors.white),
-              SizedBox(height: 16),
-              Text(
-                'Loading video...',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return VisibilityDetector(
-      key: Key('video_player_$videoKey'),
-      onVisibilityChanged: (VisibilityInfo info) {
-        _handleVisibilityChanged(videoKey, controller, info);
-      },
-      child: LayoutBuilder(
-        key: _mentionedVideoKeys[mediaIndex],
-        builder: (context, constraints) => Container(
-          color: Colors.black,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Video player
-              FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: controller.value.size.width,
-                  height: controller.value.size.height,
-                  child: VideoPlayer(controller),
-                ),
-              ),
-
-              // Invisible overlay for tap detection
-              Positioned.fill(
-                child: GestureDetector(
-                  onTapUp: (TapUpDetails details) {
-                    // _handleVideoTap(details, constraints, mediaIndex);
-                  },
-                  child: Container(
-                    color: Colors.transparent,
-                  ),
-                ),
-              ),
-
-              // Play/pause button overlay
-              GestureDetector(
-                onTap: () => _playPause(controller),
-                child: Icon(
-                  controller.value.isPlaying
-                      ? Icons.pause_circle
-                      : Icons.play_circle_fill,
-                  size: 64,
-                  color: Colors.white70,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
-  }
-
-  /// Handle visibility changes for video player
-  void _handleVisibilityChanged(
-    String videoKey,
-    VideoPlayerController controller,
-    VisibilityInfo info,
-  ) {
-    final isFullyVisible = info.visibleFraction >= 1.0;
-    final wasVisible = _videoVisibilityStates[videoKey] ?? false;
-    _videoVisibilityStates[videoKey] = isFullyVisible;
-
-    // Only play when 100% visible, pause otherwise
-    if (mounted && controller.value.isInitialized) {
-      try {
-        if (isFullyVisible && !wasVisible) {
-          // Video became fully visible - play it
-          if (!controller.value.isPlaying) {
-            controller.play();
-            setState(() {});
-          }
-        } else if (!isFullyVisible && wasVisible) {
-          // Video is no longer fully visible - pause it
-          if (controller.value.isPlaying) {
-            controller.pause();
-            setState(() {});
-          }
-        }
-      } catch (e) {
-        debugPrint('Error handling visibility change: $e');
-      }
-    }
   }
 
   void _handleImageTap(TapUpDetails? details, BoxConstraints? constraints,
@@ -1050,8 +820,6 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
     final maxSelectableThisSession =
         (configMax - mentionsOnOtherMedia).clamp(0, configMax);
 
-    _disposeAllVideoControllers();
-
     final taggedUserList = await IsrAppNavigator.goToSearchUserScreen(
       context,
       socialUserList: selectedUsers,
@@ -1059,8 +827,6 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
     );
 
     if (!mounted) return;
-
-    _syncActiveVideoController(_currentIndex);
 
     if (taggedUserList.isEmptyOrNull) return;
     _setMentionedUserPosition(taggedUserList, mediaIndex, relativePosition);
@@ -1109,7 +875,7 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
 
   void _closeWithoutSaving() {
     if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
+    unawaited(_popRoute<void>());
   }
 
   void _completeTagging() {
@@ -1119,6 +885,6 @@ class _TagPeopleScreenState extends State<TagPeopleScreen> {
         .expand((list) => list)
         .toList(growable: false);
 
-    Navigator.of(context, rootNavigator: true).pop(finalMentionDataList);
+    unawaited(_popRoute<List<MentionData>>(finalMentionDataList));
   }
 }

@@ -31,8 +31,7 @@ class _SearchUserViewState extends State<SearchUserView>
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   bool _isSearching = false;
-  SearchUserBloc get _searchUserBloc =>
-      BlocProvider.of<SearchUserBloc>(context);
+  SearchUserBloc get _searchUserBloc => context.getOrCreateBloc<SearchUserBloc>();
   final List<SocialUserData> _searchResults = [];
   late AnimationController _loadingAnimationController;
   late AnimationController _resultsAnimationController;
