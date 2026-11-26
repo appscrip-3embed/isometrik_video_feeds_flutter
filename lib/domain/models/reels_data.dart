@@ -105,10 +105,12 @@ class ReelsData {
     bool? isPaid,
     Object? priceAmount,
     String? priceCurrency,
+    PostSoundInfo? sound,
+    dynamic postData,
     bool? isDataIncomplete,
   }) =>
       ReelsData(
-        postData: postData,
+        postData: postData ?? this.postData,
         postId: postId,
         userName: userName,
         userId: userId,
@@ -143,7 +145,7 @@ class ReelsData {
         isPaid: isPaid ?? this.isPaid,
         priceAmount: priceAmount ?? this.priceAmount,
         priceCurrency: priceCurrency ?? this.priceCurrency,
-        sound: sound,
+        sound: sound ?? this.sound,
         isDataIncomplete: isDataIncomplete ?? this.isDataIncomplete,
       );
 }

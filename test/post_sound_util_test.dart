@@ -1,8 +1,28 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ism_video_reel_player/domain/domain.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_audio_model.dart';
 import 'package:ism_video_reel_player/utils/post_sound_util.dart';
 
 void main() {
+  test('mergeLibraryTrack fills missing display fields from SoundTrack', () {
+    const base = PostSoundInfo(id: 'snd_diwali');
+    final track = SoundTrack(
+      id: 'snd_diwali',
+      title: 'Diwali Special',
+      author: 'Festive Beats',
+      thumbnailUrl: 'https://cdn.example/thumb.jpg',
+      trackUrl: 'https://cdn.example/preview.mp3',
+      duration: const Duration(seconds: 42),
+    );
+
+    final merged = PostSoundUtil.mergeLibraryTrack(base, track);
+
+    expect(merged.title, 'Diwali Special');
+    expect(merged.artist, 'Festive Beats');
+    expect(merged.previewUrl, track.trackUrl);
+    expect(merged.needsDisplayMetadataHydration, isFalse);
+  });
+
   test('buildSoundSnapshot caps clip length and omits title/artist', () {
     final sound = MediaEditSoundItem(
       soundId: 'snd_test',
@@ -153,5 +173,47 @@ void main() {
     final snapshot = PostSoundUtil.buildSoundSnapshot(sound: sound);
 
     expect(snapshot['original_status'], 'approved');
+  });
+
+  test('syntheticOriginalAudioSound when reel has no library sound', () {
+    final post = TimeLineData(
+      id: 'post123',
+      media: [
+        MediaData(
+          postType: PostType.video,
+          url: 'https://example.com/v.mp4',
+          duration: 30,
+        ),
+      ],
+      user: SocialUserData(username: 'alice'),
+    );
+
+    final sound = PostSoundUtil.syntheticOriginalAudioSound(post);
+
+    expect(sound, isNotNull);
+    expect(sound!.id, 'dub_post123');
+    expect(sound.title, 'Original audio');
+    expect(sound.artist, '@alice');
+    expect(PostSoundUtil.isDubExtractedSoundId(sound.id), isTrue);
+    expect(
+      PostSoundUtil.showsSoundAttribution(librarySound: null, post: post),
+      isTrue,
+    );
+  });
+
+  test('postOffersOriginalAudioDub is false when library sound is set', () {
+    final post = TimeLineData(
+      id: 'p1',
+      soundId: 'snd_abc',
+      media: [
+        MediaData(
+          postType: PostType.video,
+          url: 'https://example.com/v.mp4',
+        ),
+      ],
+    );
+
+    expect(PostSoundUtil.postOffersOriginalAudioDub(post), isFalse);
+    expect(PostSoundUtil.syntheticOriginalAudioSound(post), isNull);
   });
 }

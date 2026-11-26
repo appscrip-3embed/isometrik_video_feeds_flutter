@@ -7,6 +7,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/mode
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/model/media_edit_models.dart';
 import 'package:ism_video_reel_player/utils/camera_gallery_sound_util.dart';
 import 'package:ism_video_reel_player/utils/media_util.dart';
+import 'package:ism_video_reel_player/utils/reel_dub_audio_util.dart';
 import 'package:ism_video_reel_player/utils/utility.dart';
 
 /// Maps camera / library sounds into post + media-edit models and muxes video.
@@ -171,6 +172,56 @@ abstract final class PostSoundUtil {
     return true;
   }
 
+  /// Client-side id for “original audio” extracted from another reel (`dub_${postId}`).
+  static bool isDubExtractedSoundId(String? soundId) {
+    final id = soundId?.trim() ?? '';
+    return id.startsWith('dub_');
+  }
+
+  /// Reels with no library sound still expose “Original audio” when video is dubbable.
+  static bool postOffersOriginalAudioDub(TimeLineData post) {
+    if (isLibrarySoundId(post.sound?.id) || isLibrarySoundId(post.soundId)) {
+      return false;
+    }
+    return ReelDubAudioUtil.reelVideoUrlForDub(post) != null;
+  }
+
+  /// Synthetic [PostSoundInfo] for the overlay + sound-detail entry (no `sound_id` on API).
+  static PostSoundInfo? syntheticOriginalAudioSound(TimeLineData post) {
+    if (!postOffersOriginalAudioDub(post)) return null;
+    final durationSeconds = ReelDubAudioUtil.reelVideoDurationSecondsForDub(post);
+    final track = ReelDubAudioUtil.dubSoundTrackForPost(
+      audioFilePath: '',
+      post: post,
+      durationSeconds: durationSeconds,
+    );
+    return PostSoundInfo(
+      id: track.id,
+      title: track.title,
+      artist: track.author,
+      thumbnailUrl: track.thumbnailUrl.isNotEmpty ? track.thumbnailUrl : null,
+      durationSeconds: track.duration.inSeconds.toDouble(),
+      usageCount: 1,
+    );
+  }
+
+  /// Library attribution when present; otherwise synthetic original audio for video reels.
+  static PostSoundInfo? effectiveSoundAttribution({
+    PostSoundInfo? librarySound,
+    TimeLineData? post,
+  }) {
+    if (librarySound != null && librarySound.hasId) return librarySound;
+    if (post == null) return null;
+    return syntheticOriginalAudioSound(post);
+  }
+
+  static bool showsSoundAttribution({
+    PostSoundInfo? librarySound,
+    TimeLineData? post,
+  }) =>
+      effectiveSoundAttribution(librarySound: librarySound, post: post)?.hasId ==
+      true;
+
   static MediaEditSoundItem? soundItemFromCamera(CameraBloc cameraBloc) {
     if (!cameraBloc.hasMusicSelected) return null;
     final id = cameraBloc.selectedMusicId;
@@ -212,6 +263,39 @@ abstract final class PostSoundUtil {
   }) =>
       soundTrackStartOffsetMilliseconds(sound) +
       carouselSliceStartSeconds * 1000;
+
+  /// When timeline or post detail returns only `sound_id`, fill display fields
+  /// from `GET /api/v1/sounds/*` without dropping snapshot / usage_count.
+  static PostSoundInfo mergeLibraryTrack(PostSoundInfo base, SoundTrack track) {
+    final titleFromTrack = track.title.trim();
+    final artistFromTrack = track.author.trim();
+    return PostSoundInfo(
+      id: base.id.isNotEmpty ? base.id : track.id,
+      title: (base.title ?? '').trim().isNotEmpty
+          ? base.title
+          : (titleFromTrack.isNotEmpty ? titleFromTrack : null),
+      artist: (base.artist ?? '').trim().isNotEmpty
+          ? base.artist
+          : (artistFromTrack.isNotEmpty ? artistFromTrack : null),
+      album: base.album,
+      type: base.type,
+      usageCount: base.usageCount,
+      previewUrl: (base.previewUrl ?? '').trim().isNotEmpty
+          ? base.previewUrl
+          : (track.trackUrl.trim().isNotEmpty ? track.trackUrl.trim() : null),
+      thumbnailUrl: (base.thumbnailUrl ?? '').trim().isNotEmpty
+          ? base.thumbnailUrl
+          : (track.thumbnailUrl.trim().isNotEmpty
+              ? track.thumbnailUrl.trim()
+              : null),
+      durationSeconds: (base.durationSeconds ?? 0) > 0
+          ? base.durationSeconds
+          : (track.duration.inSeconds > 0
+              ? track.duration.inSeconds.toDouble()
+              : null),
+      snapshot: base.snapshot,
+    );
+  }
 
   /// Maps the post-detail `sound` field into the sound library [SoundTrack]
   /// used by the camera + sound-picker UI.

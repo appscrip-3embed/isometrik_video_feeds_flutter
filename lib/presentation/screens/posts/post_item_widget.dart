@@ -429,10 +429,10 @@ class _PostItemWidgetState extends State<PostItemWidget>
             _updateWithEditAction(state);
           } else if (state is IsmPostHydratedActionListenerState &&
               state.postData != null) {
-            unawaited(_replaceReelFromTimeline(
+            _syncHydratedPostIntoReelList(
               state.postData!,
               postId: state.postId,
-            ));
+            );
           }
         },
         child: BlocListener<SocialPostBloc, SocialPostState>(
@@ -469,6 +469,27 @@ class _PostItemWidgetState extends State<PostItemWidget>
     debugPrint('IsmEditPostActionListenerState: ${state.postData?.toMap()}');
     if (state.postData == null) return;
     await _replaceReelFromTimeline(state.postData!, postId: state.postId);
+  }
+
+  /// Runs synchronously so sound metadata from post detail is visible before
+  /// the user taps Original audio on the same reel.
+  void _syncHydratedPostIntoReelList(
+    TimeLineData postData, {
+    String? postId,
+  }) {
+    final id = postData.id ?? postId;
+    if (id == null || id.isEmpty) return;
+    if (!_reelsDataList.any((e) => e.postId == id)) return;
+    final index = _reelsDataList.indexWhere((element) => element.postId == id);
+    if (index == -1) return;
+    final mapped = getReelData(postData, loggedInUserId: widget.loggedInUserId);
+    final existing = _reelsDataList[index];
+    _reelsDataList[index] = mapped;
+    if (_isSoftReelUpdate(existing, mapped)) {
+      _updateState();
+      return;
+    }
+    unawaited(updateStateByKey(editedIndex: index));
   }
 
   Future<void> _replaceReelFromTimeline(

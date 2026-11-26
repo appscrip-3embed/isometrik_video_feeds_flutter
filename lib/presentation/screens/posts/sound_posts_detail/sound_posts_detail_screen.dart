@@ -47,6 +47,10 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
 
   bool get _apiSoundsMode => SoundLibraryFeatureUtil.useSoundsApi;
 
+  /// Original audio reused from a single reel (`dub_*` id) — no sounds API list.
+  bool get _isDubOriginalAudioMode =>
+      PostSoundUtil.isDubExtractedSoundId(widget.sound.id);
+
   @override
   void initState() {
     super.initState();
@@ -55,7 +59,7 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
     _playerStateSub = _previewPlayer.onPlayerStateChanged.listen((_) {
       if (mounted) setState(() {});
     });
-    if (_apiSoundsMode) {
+    if (_apiSoundsMode && !_isDubOriginalAudioMode) {
       _soundUseCase = IsmInjectionUtils.getUseCase<SoundLibraryUseCase>();
       unawaited(_refreshSoundMetadata());
       unawaited(_loadSavedState());
@@ -65,27 +69,36 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
   }
 
   Future<void> _refreshSoundMetadata() async {
+    var base = widget.sound;
+    final postId = widget.sourcePost?.id?.trim() ?? '';
+    if (postId.isNotEmpty) {
+      final hydrated = await context
+          .getOrCreateBloc<IsmSocialActionCubit>()
+          .hydrateIncompletePost(postId);
+      final fromPost = hydrated?.sound ?? widget.sourcePost?.sound;
+      if (fromPost != null && fromPost.hasId) {
+        base = fromPost;
+      }
+    }
+    if (!base.needsDisplayMetadataHydration) {
+      _displaySound.value = base;
+      if (mounted) setState(() {});
+      return;
+    }
+
     final result = await _soundUseCase!.getSoundTrackById(
       isLoading: false,
-      soundId: widget.sound.id,
+      soundId: base.id,
     );
     final track = result.data;
-    if (!mounted || track == null) return;
-    _displaySound.value = PostSoundInfo(
-      id: widget.sound.id,
-      title: track.title,
-      artist: track.author,
-      previewUrl:
-          track.trackUrl.isNotEmpty ? track.trackUrl : widget.sound.previewUrl,
-      thumbnailUrl: track.thumbnailUrl.isNotEmpty
-          ? track.thumbnailUrl
-          : widget.sound.thumbnailUrl,
-      durationSeconds: track.duration.inSeconds > 0
-          ? track.duration.inSeconds.toDouble()
-          : widget.sound.durationSeconds,
-      usageCount: widget.sound.usageCount,
-      snapshot: widget.sound.snapshot,
-    );
+    if (!mounted || track == null) {
+      if (base != widget.sound) {
+        _displaySound.value = base;
+        setState(() {});
+      }
+      return;
+    }
+    _displaySound.value = PostSoundUtil.mergeLibraryTrack(base, track);
     setState(() {});
   }
 
@@ -128,6 +141,18 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
   }
 
   void _loadPosts() {
+    if (_isDubOriginalAudioMode) {
+      final source = widget.sourcePost;
+      if (source != null && mounted) {
+        setState(() {
+          _postsList
+            ..clear()
+            ..add(source);
+          _hasMoreData = false;
+        });
+      }
+      return;
+    }
     _bloc.add(GetSoundPostsDetailEvent(soundId: widget.sound.id));
   }
 
@@ -195,7 +220,11 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
     await _previewPlayer.pause();
     IsrVideoReelConfig.suppressPlayback();
     try {
-      await UseSoundCaptureCoordinator.startFromPostSound(context, _sound);
+      await UseSoundCaptureCoordinator.startFromPostSound(
+        context,
+        _sound,
+        sourcePost: widget.sourcePost,
+      );
     } finally {
       if (mounted) {
         setState(() => _useAudioLoading = false);
@@ -275,7 +304,7 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
           },
         ),
         actions: [
-          if (_apiSoundsMode)
+          if (_apiSoundsMode && !_isDubOriginalAudioMode)
             _saveLoading
                 ? Padding(
                     padding: EdgeInsets.all(12.responsiveDimension),
@@ -495,7 +524,9 @@ class _SoundPostsDetailScreenState extends State<SoundPostsDetailScreen> {
   }
 
   Widget _buildPostsContent(SoundPostsDetailState state) {
-    if (state is SoundPostsDetailLoadingState && state.isLoading) {
+    if (!_isDubOriginalAudioMode &&
+        state is SoundPostsDetailLoadingState &&
+        state.isLoading) {
       return SliverFillRemaining(
         child: Center(child: Utility.loaderWidget(isAdaptive: false)),
       );

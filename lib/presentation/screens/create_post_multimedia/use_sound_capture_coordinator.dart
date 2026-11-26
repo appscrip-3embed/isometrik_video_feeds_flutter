@@ -11,9 +11,15 @@ abstract final class UseSoundCaptureCoordinator {
 
   static Future<void> startFromPostSound(
     BuildContext context,
-    PostSoundInfo sound,
-  ) async {
+    PostSoundInfo sound, {
+    TimeLineData? sourcePost,
+  }) async {
     if (!sound.hasId) return;
+
+    if (PostSoundUtil.isDubExtractedSoundId(sound.id) && sourcePost != null) {
+      await DubWithAudioCaptureCoordinator.handleFromPost(context, sourcePost);
+      return;
+    }
 
     var track = PostSoundUtil.soundTrackFromPostSound(sound);
     var audioPath = (sound.previewUrl ?? '').trim();

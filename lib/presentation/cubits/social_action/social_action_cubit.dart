@@ -5,6 +5,7 @@ import 'package:bloc/bloc.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:ism_video_reel_player/ism_video_reel_player.dart';
 import 'package:ism_video_reel_player/utils/extensions.dart';
+import 'package:ism_video_reel_player/utils/utils.dart';
 
 part 'social_action_state.dart';
 
@@ -27,6 +28,8 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
       IsmInjectionUtils.getUseCase<CancelOutgoingFollowRequestUseCase>();
   final GetPostDetailsUseCase _getPostDetailsUseCase =
       IsmInjectionUtils.getUseCase<GetPostDetailsUseCase>();
+  final SoundLibraryUseCase _soundLibraryUseCase =
+      IsmInjectionUtils.getUseCase<SoundLibraryUseCase>();
   final SocialUserProfileUseCase _socialUserProfileUseCase =
       IsmInjectionUtils.getUseCase<SocialUserProfileUseCase>();
   final LikePostUseCase _likePostUseCase =
@@ -104,8 +107,9 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
       return cached;
     }
 
-    final post = await _fetchPostDetailsDeduped(postId);
+    var post = await _fetchPostDetailsDeduped(postId);
     if (post == null) return cached;
+    post = await _enrichPostSoundMetadataIfNeeded(post) ?? post;
     post.isDataIncomplete = false;
     updatePostList([post]);
     emit(IsmPostHydratedActionListenerState(
@@ -113,6 +117,26 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
       postData: post,
     ));
     return post;
+  }
+
+  /// Post detail sometimes returns only `sound_id`. Reels then show "Original
+  /// audio" until library metadata is merged (same source as Use audio page).
+  Future<TimeLineData?> _enrichPostSoundMetadataIfNeeded(TimeLineData post) async {
+    if (!post.needsSoundDisplayHydration) return post;
+    if (!SoundLibraryFeatureUtil.useSoundsApi) return post;
+    final soundId = (post.sound?.id ?? post.soundId ?? '').trim();
+    if (!PostSoundUtil.isLibrarySoundId(soundId)) return post;
+
+    final result = await _soundLibraryUseCase.getSoundTrackById(
+      isLoading: false,
+      soundId: soundId,
+    );
+    final track = result.data;
+    if (track == null) return post;
+
+    final base = post.sound ?? PostSoundInfo(id: soundId);
+    final merged = PostSoundUtil.mergeLibraryTrack(base, track);
+    return post.copyWith(sound: merged);
   }
 
   Future<TimeLineData?> _fetchPostDetailsDeduped(String postId) {
@@ -138,8 +162,11 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
     final postData = result.data;
 
     if (postData != null) {
-      postData.isDataIncomplete = false;
-      updatePostList([postData]);
+      final enriched =
+          await _enrichPostSoundMetadataIfNeeded(postData) ?? postData;
+      enriched.isDataIncomplete = false;
+      updatePostList([enriched]);
+      return enriched;
     }
     if (result.isError && showError) {
       ErrorHandler.showAppError(

@@ -697,6 +697,35 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       _soundMetadataLoading &&
       (_reelData.sound?.needsDisplayMetadataHydration ?? false);
 
+  TimeLineData? get _timelinePostData => _reelData.postData is TimeLineData
+      ? _reelData.postData as TimeLineData
+      : null;
+
+  PostSoundInfo? get _effectivePostSoundInfo =>
+      PostSoundUtil.effectiveSoundAttribution(
+        librarySound: _reelData.sound,
+        post: _timelinePostData,
+      );
+
+  bool get _showsPostSoundAttribution => PostSoundUtil.showsSoundAttribution(
+        librarySound: _reelData.sound,
+        post: _timelinePostData,
+      );
+
+  void _applyHydratedTimelinePost(TimeLineData? post) {
+    if (!mounted || post == null) return;
+    final id = post.id ?? _reelData.postId;
+    if (id == null || id != _reelData.postId) return;
+    final sound = post.sound;
+    if (sound == null) return;
+    _reelData = _reelData.copyWith(
+      postData: post,
+      sound: sound,
+      isDataIncomplete: post.isDataIncomplete,
+    );
+    setState(() {});
+  }
+
   Future<void> _hydrateIncompletePostIfNeeded() async {
     final needsDetail = _reelData.isDataIncomplete == true ||
         (_reelData.sound?.needsDisplayMetadataHydration ?? false);
@@ -711,9 +740,10 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     if (!mounted) return;
     setState(() => _soundMetadataLoading = true);
     try {
-      await context
+      final hydrated = await context
           .getOrCreateBloc<IsmSocialActionCubit>()
           .hydrateIncompletePost(postId);
+      _applyHydratedTimelinePost(hydrated);
     } finally {
       if (mounted) {
         setState(() {
@@ -1973,9 +2003,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   /// Song row below caption: note + title + circular artwork (left-aligned).
   Widget _buildPostSoundRow() {
-    final sound = _reelData.sound;
+    final sound = _effectivePostSoundInfo;
     if (sound == null || !sound.hasId) return const SizedBox.shrink();
-    if (_showSoundMetadataLoading) {
+    if (_reelData.sound?.hasId == true && _showSoundMetadataLoading) {
       return const PostSoundMetadataLoadingRow(
         style: PostSoundMetadataLoadingStyle.reels,
       );
@@ -2010,11 +2040,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   }
 
   Future<void> _onTapPostSound() async {
-    if (_showSoundMetadataLoading) return;
-    final postData = _reelData.postData is TimeLineData
-        ? _reelData.postData as TimeLineData
-        : null;
-    final sound = _reelData.sound;
+    if (_reelData.sound?.hasId == true && _showSoundMetadataLoading) return;
+    final postData = _timelinePostData;
+    final sound = _effectivePostSoundInfo;
     if (sound == null || !sound.hasId) return;
 
     final handler = _postConfig.postCallBackConfig?.onUseThisSound;
@@ -3110,7 +3138,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
             IsrDimens.boxHeight(IsrDimens.eight),
             _buildCommissionTag(),
           ],
-          if (_reelData.sound?.hasId == true) ...[
+          if (_showsPostSoundAttribution) ...[
             IsrDimens.boxHeight(IsrDimens.eight),
             _buildPostSoundRow(),
           ],
