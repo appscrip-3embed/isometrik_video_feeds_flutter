@@ -81,6 +81,13 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
   bool _framingMusicRouteObscured = false;
   bool _framingMusicAppPaused = false;
 
+  /// When true, [CameraConfirmRecordingEvent] returns the raw clip without
+  /// muxing the selected sound into it. The media editor previews the sound as
+  /// an overlay and muxes once on Next (prewarmed in the background), which is
+  /// what makes the "Use audio" flow open the preview instantly.
+  /// Set by `CameraCaptureView` for `dubWithAudioMode`.
+  bool deferSoundMuxToEditor = false;
+
   final List<VideoSegment> _videoSegments = [];
   bool _isSegmentRecording = false;
   int _currentSegmentDuration = 0;
@@ -870,7 +877,8 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
         }
       }
 
-      if (_selectedMediaType == MediaType.video &&
+      if (!deferSoundMuxToEditor &&
+          _selectedMediaType == MediaType.video &&
           hasMusicSelected &&
           (_selectedMusicPreviewUrl?.isNotEmpty ?? false) &&
           finalVideoPath != null) {

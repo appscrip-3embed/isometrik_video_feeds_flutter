@@ -8,6 +8,7 @@ import 'package:ism_video_reel_player/presentation/screens/media/media_edit/mode
 import 'package:ism_video_reel_player/utils/camera_gallery_sound_util.dart';
 import 'package:ism_video_reel_player/utils/media_util.dart';
 import 'package:ism_video_reel_player/utils/reel_dub_audio_util.dart';
+import 'package:ism_video_reel_player/utils/sound_mux_prewarm_cache.dart';
 import 'package:ism_video_reel_player/utils/utility.dart';
 
 /// Maps camera / library sounds into post + media-edit models and muxes video.
@@ -457,6 +458,9 @@ abstract final class PostSoundUtil {
   }
 
   /// Replaces video audio with the selected sound URL/path.
+  ///
+  /// If [prewarmMuxVideoWithSound] already started this exact job, awaits it
+  /// instead of encoding again (see [SoundMuxPrewarmCache]).
   static Future<String> muxVideoWithSound({
     required String videoPath,
     required MediaEditSoundItem sound,
@@ -467,26 +471,65 @@ abstract final class PostSoundUtil {
 
     if (showLoader) await Utility.showLoader();
     try {
-      final videoDurationSec = await MediaUtil.videoDurationSeconds(videoPath);
-      final musicStart =
-          (_readNum(sound.soundMetadata?['start_time']) ?? 0).clamp(0.0, 86400.0);
-      final muxed = await MediaUtil.muxVideoWithMusicFromUrl(
-        videoPath: videoPath,
-        musicUrlOrPath: musicUrl,
-        maxDurationSeconds:
-            videoDurationSec > 0 ? videoDurationSec : null,
-        musicStartOffsetSeconds: musicStart,
+      final prewarmed = SoundMuxPrewarmCache.take(
+        _muxCacheKey(videoPath: videoPath, sound: sound),
       );
-      if (muxed != null &&
-          muxed != videoPath &&
-          await File(muxed).exists() &&
-          await File(muxed).length() > 64) {
-        return muxed;
+      if (prewarmed != null) {
+        final out = await prewarmed;
+        if (out != videoPath && await File(out).exists()) return out;
       }
-      return videoPath;
+      return await _muxVideoWithSoundNow(videoPath: videoPath, sound: sound);
     } finally {
       if (showLoader) Utility.closeProgressDialog();
     }
+  }
+
+  /// Starts [muxVideoWithSound] in the background so the editor can open
+  /// immediately and Next is near-instant. Safe to call and forget.
+  static void prewarmMuxVideoWithSound({
+    required String videoPath,
+    required MediaEditSoundItem sound,
+  }) {
+    if ((sound.soundUrl?.trim() ?? '').isEmpty) return;
+    SoundMuxPrewarmCache.prewarm(
+      key: _muxCacheKey(videoPath: videoPath, sound: sound),
+      videoPath: videoPath,
+      mux: () => _muxVideoWithSoundNow(videoPath: videoPath, sound: sound),
+    );
+  }
+
+  static String _muxCacheKey({
+    required String videoPath,
+    required MediaEditSoundItem sound,
+  }) =>
+      SoundMuxPrewarmCache.keyFor(
+        videoPath: videoPath,
+        soundUrl: sound.soundUrl ?? '',
+        startTimeSec:
+            (_readNum(sound.soundMetadata?['start_time']) ?? 0).toDouble(),
+      );
+
+  static Future<String> _muxVideoWithSoundNow({
+    required String videoPath,
+    required MediaEditSoundItem sound,
+  }) async {
+    final musicUrl = sound.soundUrl?.trim() ?? '';
+    final videoDurationSec = await MediaUtil.videoDurationSeconds(videoPath);
+    final musicStart =
+        (_readNum(sound.soundMetadata?['start_time']) ?? 0).clamp(0.0, 86400.0);
+    final muxed = await MediaUtil.muxVideoWithMusicFromUrl(
+      videoPath: videoPath,
+      musicUrlOrPath: musicUrl,
+      maxDurationSeconds: videoDurationSec > 0 ? videoDurationSec : null,
+      musicStartOffsetSeconds: musicStart,
+    );
+    if (muxed != null &&
+        muxed != videoPath &&
+        await File(muxed).exists() &&
+        await File(muxed).length() > 64) {
+      return muxed;
+    }
+    return videoPath;
   }
 
   static Future<String> applySoundToVideoWithCameraBloc({

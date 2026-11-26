@@ -1,15 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:ism_video_reel_player/ism_video_reel_player.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/media_edit.dart'
     as me;
 import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/utils/utils.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 
 class DubWithAudioCaptureCoordinator {
   DubWithAudioCaptureCoordinator._();
@@ -101,106 +97,45 @@ class DubWithAudioCaptureCoordinator {
     if (!context.mounted) return;
     if (capture == null || capture.mediaPath.isEmpty) return;
 
-    final nav = Navigator.of(context, rootNavigator: true);
-    // Opaque loader covers Social feed while thumbnails prepare and editor opens.
-    final loaderRoute = PageRouteBuilder<void>(
-      opaque: true,
-      barrierDismissible: false,
-      pageBuilder: (_, __, ___) => const PopScope(
-        canPop: false,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(child: AppLoader()),
-        ),
-      ),
-    );
-    unawaited(nav.push<void>(loaderRoute));
-
-    me.MediaEditItem? editItem;
-    try {
-      editItem = await _buildEditItem(
-        videoPath: capture.mediaPath,
-        track: track,
-      );
-    } catch (e) {
-      debugPrint('DubWithAudioCaptureCoordinator: prepare edit item: $e');
-      editItem = null;
-    }
-
-    if (!context.mounted) {
-      _safeRemoveRoute(nav, loaderRoute);
-      return;
-    }
-    if (editItem == null) {
-      _safeRemoveRoute(nav, loaderRoute);
-      return;
-    }
-
-    // Push editor on top of the loader, then drop the loader underneath so
-    // Social feed never appears between camera and Add Post.
-    final editedFuture = IsrAppNavigator.presentCreatePostMediaEditor(
-      context,
-      mediaItems: [editItem],
-      allowAddMoreMedia: false,
-      onDismissEntireFlow: () => IsrAppNavigator.dismissCreatePostFlow(context),
-    );
-    _safeRemoveRoute(nav, loaderRoute);
-
-    final edited = await editedFuture;
-    if (!context.mounted) return;
-    if (edited == null || edited.isEmpty) return;
-
-    final mediaDataList = CreatePostFlowCoordinator.mediaDataFromEditItems(edited);
-    await IsrAppNavigator.presentCreatePostFromMedia(
-      context,
-      mediaDataList: mediaDataList,
-      dismissEntireFlowOnClose: true,
-    );
-  }
-
-  static void _safeRemoveRoute(NavigatorState nav, Route<void> route) {
-    if (route.isActive) {
-      nav.removeRoute(route);
-    }
-  }
-
-  static Future<me.MediaEditItem> _buildEditItem({
-    required String videoPath,
-    required SoundTrack track,
-  }) async {
-    final thumb = await _resolvePreviewThumbnail(
-      videoPath: videoPath,
-      reelThumbnailUrl: track.thumbnailUrl,
-    );
-    final soundItem = PostSoundUtil.soundItemFromTrack(track);
-    return me.MediaEditItem(
-      originalPath: videoPath,
+    // Instagram-style hand-off: the camera returns the raw clip (no mux, see
+    // CameraBloc.deferSoundMuxToEditor), the editor opens right away and plays
+    // the sound as an overlay, and the real mux runs in the background so Next
+    // is near-instant. The editor generates its own single-frame thumbnail.
+    final editItem = me.MediaEditItem(
+      originalPath: capture.mediaPath,
       mediaType: me.EditMediaType.video,
       width: 0,
       height: 0,
       duration: track.duration.inSeconds,
-      thumbnailPath: thumb,
-      sound: soundItem,
+      sound: PostSoundUtil.soundItemFromTrack(track),
     );
-  }
-
-  static Future<String> _resolvePreviewThumbnail({
-    required String videoPath,
-    required String reelThumbnailUrl,
-  }) async {
-    final documentsDir = await getApplicationDocumentsDirectory();
-    final thumbDir = path.join(documentsDir.path, 'media', 'dub_thumbs');
-    final fromVideo = await MediaUtil.pickBestVideoThumbnailPath(
-      videoPath: videoPath,
-      thumbnailPath: thumbDir,
-      quality: 75,
+    PostSoundUtil.prewarmMuxVideoWithSound(
+      videoPath: editItem.originalPath,
+      sound: editItem.sound!,
     );
-    if (fromVideo != null) return fromVideo;
 
-    final fromReel = await _cacheReelThumbnail(reelThumbnailUrl);
-    if (fromReel != null) return fromReel;
+    try {
+      final edited = await IsrAppNavigator.presentCreatePostMediaEditor(
+        context,
+        mediaItems: [editItem],
+        allowAddMoreMedia: false,
+        onDismissEntireFlow: () =>
+            IsrAppNavigator.dismissCreatePostFlow(context),
+      );
+      if (!context.mounted) return;
+      if (edited == null || edited.isEmpty) return;
 
-    return videoPath;
+      final mediaDataList =
+          CreatePostFlowCoordinator.mediaDataFromEditItems(edited);
+      await IsrAppNavigator.presentCreatePostFromMedia(
+        context,
+        mediaDataList: mediaDataList,
+        dismissEntireFlowOnClose: true,
+      );
+    } finally {
+      // No-op if Next already claimed the result; otherwise frees the file.
+      SoundMuxPrewarmCache.discard();
+    }
   }
 
   static Future<String?> _extractAudioWithLoader(
@@ -228,35 +163,4 @@ class DubWithAudioCaptureCoordinator {
     }
   }
 
-  static Future<String?> _cacheReelThumbnail(String url) async {
-    final trimmed = url.trim();
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      final file = File(trimmed);
-      if (await file.exists()) return trimmed;
-      return null;
-    }
-    try {
-      final uri = Uri.tryParse(trimmed);
-      if (uri == null) return null;
-      final response =
-          await http.get(uri).timeout(const Duration(seconds: 15));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        return null;
-      }
-      final tempDir = await getTemporaryDirectory();
-      final ext = path.extension(uri.path);
-      final suffix = ext.isNotEmpty && ext.length <= 6 ? ext : '.jpg';
-      final file = File(
-        path.join(
-          tempDir.path,
-          'dub_reel_thumb_${DateTime.now().millisecondsSinceEpoch}$suffix',
-        ),
-      );
-      await file.writeAsBytes(response.bodyBytes);
-      if (await file.length() > 64) return file.path;
-    } catch (e) {
-      debugPrint('DubWithAudioCaptureCoordinator: reel thumb download: $e');
-    }
-    return null;
-  }
 }

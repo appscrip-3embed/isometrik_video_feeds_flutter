@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ism_video_reel_player/presentation/screens/media/media_edit/media_edit.dart';
+import 'package:ism_video_reel_player/utils/audio_source_util.dart';
 import 'package:ism_video_reel_player/utils/post_sound_util.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -211,7 +212,8 @@ class _VideoPreviewWidgetState extends State<VideoPreviewWidget> {
     _soundPlayer = player;
     try {
       await player.setReleaseMode(ReleaseMode.stop);
-      await player.setSource(UrlSource(url));
+      // Local file for sound extracted from a reel; URL for library sounds.
+      await player.setSource(audioSourceFromUrlOrPath(url));
       final offsetMs = widget.postSoundStartOffsetMilliseconds;
       if (offsetMs > 0) {
         await player.seek(Duration(milliseconds: offsetMs));

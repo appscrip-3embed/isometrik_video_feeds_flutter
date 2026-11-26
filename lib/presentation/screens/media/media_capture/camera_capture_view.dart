@@ -52,6 +52,7 @@ class _CameraCaptureViewState extends State<CameraCaptureView>
 
   Future<void> _initializeCameraWithRetry() async {
     final initialDuration = widget.initialDurationSeconds ?? 15;
+    _cameraBloc.deferSoundMuxToEditor = widget.dubWithAudioMode;
     if (widget.dubWithAudioMode) {
       _cameraBloc.add(CameraSetMediaTypeEvent(mediaType: MediaType.video));
       _cameraBloc.add(CameraSetDurationEvent(duration: initialDuration));
@@ -126,7 +127,8 @@ class _CameraCaptureViewState extends State<CameraCaptureView>
               _isNavigatingToEdit = true;
               _popWithCapturedMedia(
                 state.mediaPath,
-                soundAppliedToVideo: _cameraBloc.hasMusicSelected,
+                soundAppliedToVideo: _cameraBloc.hasMusicSelected &&
+                    !_cameraBloc.deferSoundMuxToEditor,
               );
             }
           },

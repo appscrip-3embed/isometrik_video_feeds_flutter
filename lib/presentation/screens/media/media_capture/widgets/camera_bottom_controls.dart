@@ -799,17 +799,12 @@ class _CameraBottomControlsState extends State<CameraBottomControls>
       );
       if (!mounted || trimmedPath == null || trimmedPath.isEmpty) return;
 
-      final applied = await CameraGallerySoundUtil.applySelectedSoundToVideo(
-        cameraBloc: widget.cameraBloc,
-        videoPath: trimmedPath,
-        showLoader: false,
-      );
-
-      if (!mounted) return;
+      // No mux here: the editor previews the sound as an overlay and muxes on
+      // Next (prewarmed by DubWithAudioCaptureCoordinator), so preview is instant.
       widget.onMediaPicked(
-        applied.videoPath,
+        trimmedPath,
         MediaType.video,
-        soundAppliedToVideo: applied.soundApplied,
+        soundAppliedToVideo: false,
       );
     } catch (e) {
       Utility.showToastMessage('Error picking video: $e');

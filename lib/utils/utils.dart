@@ -34,6 +34,7 @@ export 'reels_feed_precache_coordinator.dart';
 export 'reel_dub_audio_util.dart';
 export 'rejected_post_resubmit_service.dart';
 export 'sound_library_feature_util.dart';
+export 'sound_mux_prewarm_cache.dart';
 export 'text_post_composer_limits.dart';
 export 'timeline_post_type_util.dart';
 export 'triangle_painter.dart';
