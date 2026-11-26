@@ -340,6 +340,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   // Image view tracking
   Timer? _imageViewTimer;
+  Timer? _paidLockImpressionTimer;
   bool _isImagePaused = false;
   bool _isPlaybackBlocked = false;
 
@@ -441,7 +442,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
       if (!_hasFetchedFloatingComments) {
         _fetchFloatingCommentsIfNeeded();
       }
-      if (!_isPlaybackBlocked &&
+      if (_shouldShowPaidLockOverlay) {
+        _startPaidLockImpressionTracking();
+      } else if (!_isPlaybackBlocked &&
           widget.reelsConfig.isTabVisible() &&
           IsrVideoReelConfig.allowsPlayback) {
         _resumePlayback();
@@ -449,6 +452,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
           unawaited(_startImageSoundIfNeeded());
         }
       }
+    }
+    if (!isVisible) {
+      _paidLockImpressionTimer?.cancel();
     }
     debugPrint(
         'IsmReelsVideoPlayerView: _onCurrentIndexChanged {Post index: ${widget.index}, currentIndex: ${widget.currentIndex.value}}');
@@ -469,6 +475,11 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     debugPrint(
         'IsmReelsVideoPlayerView: initState index: ${widget.index}, visibleIndex: ${widget.currentIndex.value}, tabType: ${widget.postSectionType}');
     super.initState();
+    if (_wasVisiblePost && _shouldShowPaidLockOverlay) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startPaidLockImpressionTracking();
+      });
+    }
   }
 
   @override
@@ -993,6 +1004,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     _muteAnimationTimer?.cancel();
     _audioDebounceTimer?.cancel();
     _imageViewTimer?.cancel();
+    _paidLockImpressionTimer?.cancel();
     unawaited(_imageSoundPositionSub?.cancel());
     _imageSoundPositionSub = null;
     unawaited(_disposeImageSound());
@@ -3917,6 +3929,21 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   double _finalWatchProgress = 0.0;
   int _finalWatchDurationSeconds = 0;
+
+  /// Paid posts show a lock overlay (no playback) but should still count as viewed
+  /// for FYP / engagement once the card is visible briefly.
+  void _startPaidLockImpressionTracking() {
+    if (!_shouldShowPaidLockOverlay) return;
+    if (widget.currentIndex.value != widget.index) return;
+    _paidLockImpressionTimer?.cancel();
+    const tick = Duration(seconds: 1);
+    _paidLockImpressionTimer = Timer.periodic(tick, (_) {
+      if (!mounted || widget.currentIndex.value != widget.index) return;
+      _finalWatchDurationSeconds += 1;
+      _finalWatchProgress =
+          (_finalWatchDurationSeconds / 3).clamp(0.0, 1.0);
+    });
+  }
 
   /// Logs view watch data when the user leaves (next/previous post or navigates away).
   /// Only sends once per view and if watch was meaningful (≥25% or ≥3s).

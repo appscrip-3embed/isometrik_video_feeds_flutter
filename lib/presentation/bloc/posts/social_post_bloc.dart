@@ -35,6 +35,41 @@ List<TimeLineData> _postsVisibleInSection(
   return TimelinePostTypeUtil.withoutTextPosts(posts);
 }
 
+bool _isCursorReelsSection(PostSectionType section) =>
+    section == PostSectionType.trending || section == PostSectionType.forYou;
+
+/// FYP may return text posts that reels UI drops. Backend often waits until
+/// every item in the batch is "viewed" before sending the next cursor page.
+void _recordTextPostsExcludedFromReels(
+  PostSectionType section,
+  List<TimeLineData> apiRaw,
+  List<TimeLineData> visible,
+) {
+  if (!_isCursorReelsSection(section)) return;
+  if (TimelinePostTypeUtil.shouldShowTextPosts(section)) return;
+  if (!EventQueueProvider.isInitialized) return;
+
+  final visibleIds = visible
+      .map((p) => p.id?.trim())
+      .where((id) => id != null && id.isNotEmpty)
+      .toSet();
+
+  for (final post in apiRaw) {
+    if (!post.isTextPost) continue;
+    final postId = post.id?.trim();
+    if (postId == null || postId.isEmpty || visibleIds.contains(postId)) {
+      continue;
+    }
+    EventQueueProvider.instance.logEvent(EventType.postViewed.value, {
+      'post_id': postId,
+      'view_source': 'fyp',
+      'view_duration': 1,
+      'view_completion_rate': 0,
+      'excluded_from_reels_ui': true,
+    });
+  }
+}
+
 class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
   SocialPostBloc(
       this._localDataUseCase,
@@ -760,7 +795,13 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         break;
     }
     if (apiPostResult != null && apiPostResult!.isNotEmpty) {
+      final rawFromApi = List<TimeLineData>.from(apiPostResult!);
       apiPostResult = _postsVisibleInSection(postSectionType, apiPostResult!);
+      _recordTextPostsExcludedFromReels(
+        postSectionType,
+        rawFromApi,
+        apiPostResult!,
+      );
     }
     var postDataList = <TimeLineData>[];
     if (postIdPostData != null) {
