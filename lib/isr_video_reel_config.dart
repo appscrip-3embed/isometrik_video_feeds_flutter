@@ -143,6 +143,11 @@ class IsrVideoReelConfig {
   /// Set only by the host via [pauseFeedPlayback] / [resumeFeedPlayback].
   static bool isHostFeedTabVisible = true;
 
+  /// Notifies reel players when the host leaves or returns to the reels tab
+  /// (for view analytics when the feed has only one item).
+  static final ValueNotifier<bool> hostFeedTabVisibleNotifier =
+      ValueNotifier<bool>(true);
+
   static int _overlayReelsPlayerCount = 0;
 
   /// Bloc instance wired to the visible overlay [IsmPostView] tree.
@@ -442,6 +447,9 @@ class IsrVideoReelConfig {
   /// Host-only: user left the reels bottom-nav tab (profile, explore, etc.).
   static void pauseFeedPlayback() {
     isHostFeedTabVisible = false;
+    if (hostFeedTabVisibleNotifier.value) {
+      hostFeedTabVisibleNotifier.value = false;
+    }
     _emitPlayPause(play: false);
     IsrActiveVideoPlayerRegistry.releasePreloadedMemory();
     IsrActiveVideoPlayerRegistry.releaseHostFeedMemory();
@@ -451,6 +459,9 @@ class IsrVideoReelConfig {
   /// Host-only: user returned to the reels bottom-nav tab.
   static void resumeFeedPlayback() {
     isHostFeedTabVisible = true;
+    if (!hostFeedTabVisibleNotifier.value) {
+      hostFeedTabVisibleNotifier.value = true;
+    }
 
     void kick() {
       if (!isHostFeedTabVisible || _overlayReelsPlayerCount > 0) return;

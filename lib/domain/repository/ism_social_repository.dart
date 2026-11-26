@@ -25,6 +25,7 @@ abstract class SocialRepository extends BaseRepository {
     required bool isLoading,
     required String? cursor,
     required int limit,
+    String? postTypes,
   });
 
   Future<CustomResponse<FollowUnfollowResponseModel?>> followUser({
@@ -254,6 +255,7 @@ abstract class SocialRepository extends BaseRepository {
     required bool isLoading,
     required String? cursor,
     required int limit,
+    String? postTypes,
   });
 
   Future<CustomResponse<SearchUserResponse?>> getMentionedUsers({

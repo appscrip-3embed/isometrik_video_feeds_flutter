@@ -79,6 +79,7 @@ class SocialRepositoryImpl implements SocialRepository {
     required bool isLoading,
     required String? cursor,
     required int limit,
+    String? postTypes,
   }) async {
     try {
       final header = await _dataSource.getHeader();
@@ -87,6 +88,7 @@ class SocialRepositoryImpl implements SocialRepository {
         header: header,
         cursor: cursor,
         limit: limit,
+        postTypes: postTypes,
       );
       return await _mapTimelineDataResponseWithLocalActions(response);
     } catch (e) {
@@ -818,6 +820,7 @@ class SocialRepositoryImpl implements SocialRepository {
     required bool isLoading,
     required String? cursor,
     required int limit,
+    String? postTypes,
   }) async {
     try {
       final header = await _dataSource.getHeader();
@@ -826,6 +829,7 @@ class SocialRepositoryImpl implements SocialRepository {
         header: header,
         cursor: cursor,
         limit: limit,
+        postTypes: postTypes,
       );
       return await _mapTimelineDataResponseWithLocalActions(response);
     } catch (e) {

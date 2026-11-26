@@ -108,6 +108,10 @@ class EventQueueProvider {
 
   /// Check if the event queue is initialized
   static bool get isInitialized => _instance != null;
+
+  /// POSTs queued views even when count is under the batch size (host tab exit, etc.).
+  static Future<void> flushPendingPostViews() =>
+      instance.flushPendingPostViews();
 }
 
 class LocalEventQueue with WidgetsBindingObserver {
@@ -117,6 +121,7 @@ class LocalEventQueue with WidgetsBindingObserver {
   static const _batchSize = IsrAppConstants.postViewImpressionBatchSize;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _partialFlushDebounce;
   bool _isSending = false;
   bool _sendAgainAfterCurrent = false;
 
@@ -181,7 +186,10 @@ class LocalEventQueue with WidgetsBindingObserver {
         _talker?.info(
             '${runtimeType.toString()}:Event Name: $eventName added with\n Event Data : ${jsonEncode(payload)}');
         if (box.length >= _batchSize) {
+          _cancelPartialFlushDebounce();
           await sendPendingEventsToBackend();
+        } else {
+          _schedulePartialFlushDebounce();
         }
       }
     } catch (e, stackTrace) {
@@ -271,8 +279,40 @@ class LocalEventQueue with WidgetsBindingObserver {
   }
 
   /// Drains queued post views even when fewer than [_batchSize] (e.g. user left reels).
-  Future<void> flushPendingPostViews() =>
-      sendPendingEventsToBackend(forcePartialFlush: true);
+  Future<void> flushPendingPostViews() {
+    _cancelPartialFlushDebounce();
+    return sendPendingEventsToBackend(forcePartialFlush: true);
+  }
+
+  void _cancelPartialFlushDebounce() {
+    _partialFlushDebounce?.cancel();
+    _partialFlushDebounce = null;
+  }
+
+  /// POSTs a partial queue after the user stops scrolling reels briefly.
+  void _schedulePartialFlushDebounce() {
+    _cancelPartialFlushDebounce();
+    final debounce = IsrAppConstants.postViewPartialFlushDebounce;
+    _partialFlushDebounce = Timer(debounce, () {
+      _partialFlushDebounce = null;
+      unawaited(sendPendingEventsToBackend(forcePartialFlush: true));
+    });
+    final pending = Hive.isBoxOpen(_boxName)
+        ? Hive.box<LocalEvent>(_boxName).length
+        : 0;
+    debugPrint(
+      '${runtimeType.toString()}: Partial post-view flush in ${debounce.inSeconds}s '
+      '($pending/$_batchSize queued)',
+    );
+  }
+
+  void _schedulePartialFlushIfNeeded() {
+    if (!Hive.isBoxOpen(_boxName)) return;
+    final pending = Hive.box<LocalEvent>(_boxName).length;
+    if (pending > 0 && pending < _batchSize) {
+      _schedulePartialFlushDebounce();
+    }
+  }
 
   /// Sends queued post-view impressions to `/api/v1/views`.
   ///
@@ -342,6 +382,7 @@ class LocalEventQueue with WidgetsBindingObserver {
       } while (_sendAgainAfterCurrent);
     } finally {
       _isSending = false;
+      _schedulePartialFlushIfNeeded();
     }
   }
 
@@ -366,6 +407,7 @@ class LocalEventQueue with WidgetsBindingObserver {
 
   /// cleanup
   void dispose() {
+    _cancelPartialFlushDebounce();
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
     WidgetsBinding.instance.removeObserver(this);

@@ -1,5 +1,6 @@
 import 'package:ism_video_reel_player/core/core.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
+import 'package:ism_video_reel_player/utils/timeline_post_type_util.dart';
 
 class GetForYouPostUseCase extends BaseUseCase {
   GetForYouPostUseCase(this._repository);
@@ -16,6 +17,7 @@ class GetForYouPostUseCase extends BaseUseCase {
           isLoading: isLoading,
           cursor: cursor,
           limit: limit,
+          postTypes: TimelinePostTypeUtil.mediaOnlyPostTypes,
         );
         return ApiResult(
             data: response.responseCode == 200 ? response.data : null);

@@ -36,6 +36,7 @@ abstract class SocialApiService extends BaseService {
     required Header header,
     required String? cursor,
     required int limit,
+    String? postTypes,
   });
 
   Future<ResponseModel> followUser({
@@ -288,6 +289,7 @@ abstract class SocialApiService extends BaseService {
     required Header header,
     required String? cursor,
     required int limit,
+    String? postTypes,
   });
 
   Future<ResponseModel> getMentionedUsers({

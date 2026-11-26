@@ -57,6 +57,18 @@ class IsrAppConstants {
   static const int scheduleMinAdvanceMinutes = 30;
   /// Queue depth before [LocalEventQueue] POSTs `/api/v1/views` (see `local_event_manager`).
   static const int postViewImpressionBatchSize = 10;
+
+  /// Reels FYP/Trending: keep loading cursor pages until at least this many
+  /// media posts (text is client-filtered and must not leave a 1-item feed).
+  static const int reelsFeedMinMediaPostCount = 3;
+
+  /// Cap extra `/fyp` rounds when the first page is mostly text posts.
+  static const int fypMediaBackfillMaxRounds = 8;
+
+  /// After the last queued view while count is under [postViewImpressionBatchSize], POST
+  /// any partial batch (so 1–2 views still count without leaving reels).
+  static const Duration postViewPartialFlushDebounce =
+      Duration(seconds: 5);
   static const bool convertHlsPostMediaToImageMedia = false;
 
   static const List<String> restrictedWords = [

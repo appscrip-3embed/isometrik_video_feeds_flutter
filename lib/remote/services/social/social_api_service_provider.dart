@@ -136,6 +136,7 @@ class SocialApiServiceProvider extends SocialApiService {
     required Header header,
     required String? cursor,
     required int limit,
+    String? postTypes,
   }) =>
       _getHeaders(header).then(
         (headers) => networkClient.makeRequest(
@@ -145,6 +146,8 @@ class SocialApiServiceProvider extends SocialApiService {
           {
             if (!cursor.isEmptyOrNull) 'cursor': cursor,
             'limit': limit.toString(),
+            if (postTypes != null && postTypes.isNotEmpty)
+              'post_types': postTypes,
           },
           headers,
           isLoading,
@@ -947,6 +950,7 @@ class SocialApiServiceProvider extends SocialApiService {
     required Header header,
     required String? cursor,
     required int limit,
+    String? postTypes,
   }) =>
       _getHeaders(header).then(
         (headers) => networkClient.makeRequest(
@@ -956,6 +960,8 @@ class SocialApiServiceProvider extends SocialApiService {
           {
             if (!cursor.isEmptyOrNull) 'cursor': cursor,
             'limit': limit.toString(),
+            if (postTypes != null && postTypes.isNotEmpty)
+              'post_types': postTypes,
           },
           headers,
           isLoading,

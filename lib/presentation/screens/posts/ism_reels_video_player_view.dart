@@ -416,6 +416,12 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     });
   }
 
+  void _onHostFeedTabVisibility() {
+    if (IsrVideoReelConfig.hostFeedTabVisibleNotifier.value) return;
+    if (!_wasVisiblePost || widget.currentIndex.value != widget.index) return;
+    _logWatchPostEvent();
+  }
+
   void _onCurrentIndexChanged() {
     final isVisible = widget.currentIndex.value == widget.index;
     if (_wasVisiblePost && !isVisible) {
@@ -458,6 +464,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     widget.currentIndex.addListener(_onCurrentIndexChanged);
     widget.lifecycleResumeTick?.addListener(_onLifecycleResumeTick);
     VideoMuteController.notifier.addListener(_onGlobalMuteChanged);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .addListener(_onHostFeedTabVisibility);
     debugPrint(
         'IsmReelsVideoPlayerView: initState index: ${widget.index}, visibleIndex: ${widget.currentIndex.value}, tabType: ${widget.postSectionType}');
     super.initState();
@@ -976,6 +984,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     widget.currentIndex.removeListener(_onCurrentIndexChanged);
     widget.lifecycleResumeTick?.removeListener(_onLifecycleResumeTick);
     VideoMuteController.notifier.removeListener(_onGlobalMuteChanged);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .removeListener(_onHostFeedTabVisibility);
     IsrImageSoundRegistry.releaseOwner(this);
     _tapGestureRecognizer?.dispose();
     _pageController?.dispose();

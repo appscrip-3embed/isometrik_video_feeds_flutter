@@ -119,6 +119,7 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
 
   final _postsByTab = <PostTabAssistData>[];
   final Set<PostSectionType> _homeTabLoadInFlight = {};
+  var _reelsMediaBackfillInFlight = false;
 
   PostTabAssistData _getTabAssistData(PostSectionType tab) => _postsByTab
           .toList()
@@ -528,6 +529,43 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         event.isRefresh, event.isPagination, event.isLoading, event.onComplete);
   }
 
+  /// FYP/Trending may return text posts; reels hides those client-side. Fetch
+  /// more cursor pages until the visible list is usable (min count or no cursor).
+  Future<void> _backfillReelsMediaIfNeeded(
+    PostTabAssistData tab,
+    bool isLoading,
+  ) async {
+    final section = tab.postSectionType;
+    if (!_usesCursorPagination(section) ||
+        TimelinePostTypeUtil.shouldShowTextPosts(section)) {
+      return;
+    }
+    if (_reelsMediaBackfillInFlight) return;
+    _reelsMediaBackfillInFlight = true;
+    try {
+      const minPosts = IsrAppConstants.reelsFeedMinMediaPostCount;
+      const maxRounds = IsrAppConstants.fypMediaBackfillMaxRounds;
+      var round = 0;
+      while (tab.postList.length < minPosts &&
+          tab.hasMorePages &&
+          round < maxRounds) {
+        final before = tab.postList.length;
+        round++;
+        await _callGetTabPost(
+          tab,
+          false,
+          true,
+          isLoading,
+          null,
+          mergeWithExisting: false,
+        );
+        if (tab.postList.length <= before) break;
+      }
+    } finally {
+      _reelsMediaBackfillInFlight = false;
+    }
+  }
+
   Future<void> _callGetTabPost(
     PostTabAssistData postTabAssistData,
     bool isFromRefresh,
@@ -829,6 +867,19 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         }
       }
       unawaited(FeedMediaOrientation.prefetchForPosts(postDataList));
+
+      if (_usesCursorPagination(postSectionType) &&
+          !_reelsMediaBackfillInFlight) {
+        final needsBackfill = tabAssistData.postList.length <
+            IsrAppConstants.reelsFeedMinMediaPostCount;
+        if (needsBackfill) {
+          if (isFromPagination) {
+            unawaited(_backfillReelsMediaIfNeeded(tabAssistData, isLoading));
+          } else {
+            await _backfillReelsMediaIfNeeded(tabAssistData, isLoading);
+          }
+        }
+      }
 
       if (followSensitive) {
         unawaited(
