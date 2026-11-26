@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:ism_video_reel_player/res/res.dart';
+import 'package:ism_video_reel_player/utils/processing_overlay_lottie.dart';
 import 'package:lottie/lottie.dart';
 
 /// Branded full-screen blocker for sound mux, media prep, and post setup.
@@ -16,8 +17,10 @@ class IsrProcessingOverlay extends StatelessWidget {
     this.backgroundColor = Colors.white,
     this.fontFamily,
     this.progress,
-    /// Post/create flows use [AssetConstants.postResponseJson] by default.
+    /// When null, uses [ProcessingOverlayLottie.resolve] (SDK or host config).
     this.lottieAsset,
+    this.lottiePackage,
+    this.useThemeSurfaces = true,
   });
 
   final String title;
@@ -28,15 +31,53 @@ class IsrProcessingOverlay extends StatelessWidget {
   final String? fontFamily;
   final double? progress;
   final String? lottieAsset;
+  final String? lottiePackage;
 
-  Widget _buildHeroAnimation() {
-    final asset = lottieAsset ?? AssetConstants.postResponseJson;
-    final resolved = AssetConstants.resolveAsset(asset);
+  /// Uses [ThemeData.colorScheme] for card/text when host colors are not passed.
+  final bool useThemeSurfaces;
+
+  ProcessingOverlayLottieRef _resolveHeroAsset(BuildContext context) {
+    if (lottieAsset != null && lottieAsset!.isNotEmpty) {
+      if (lottiePackage != null && lottiePackage!.isNotEmpty) {
+        return (path: lottieAsset!, package: lottiePackage);
+      }
+      if (lottieAsset!.startsWith('packages/')) {
+        return AssetConstants.resolveAsset(lottieAsset!);
+      }
+      return (path: lottieAsset!, package: null);
+    }
+    return ProcessingOverlayLottie.resolveFromContext(context);
+  }
+
+  Widget _buildHeroAnimation(BuildContext context) {
+    final resolved = _resolveHeroAsset(context);
+    final path = resolved.path;
+    final isGif = path.toLowerCase().endsWith('.gif');
+    final size = isGif ? 120.h : 88.h;
+
+    if (isGif) {
+      return SizedBox(
+        height: size,
+        width: size,
+        child: Image.asset(
+          path,
+          package: resolved.package,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => Icon(
+            Icons.movie_creation_outlined,
+            size: 48.sp,
+            color: primaryColor,
+          ),
+        ),
+      );
+    }
+
     return SizedBox(
-      height: 88.h,
-      width: 88.w,
+      height: size,
+      width: size,
       child: Lottie.asset(
-        resolved.path,
+        path,
         package: resolved.package,
         fit: BoxFit.contain,
         repeat: true,
@@ -49,9 +90,24 @@ class IsrProcessingOverlay extends StatelessWidget {
     );
   }
 
+  bool _heroUsesAnimatedGif(BuildContext context) {
+    return _resolveHeroAsset(context).path.toLowerCase().endsWith('.gif');
+  }
+
   @override
   Widget build(BuildContext context) {
     final showDeterminate = progress != null && progress! > 0 && progress! < 100;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = useThemeSurfaces
+        ? scheme.surfaceContainerHigh
+        : backgroundColor;
+    final titleColor = useThemeSurfaces ? scheme.onSurface : textColor;
+    final subtitleColor = useThemeSurfaces
+        ? scheme.onSurfaceVariant
+        : textColor.withValues(alpha: 0.72);
+    final scrimAlpha = isDark ? 0.72 : 0.52;
 
     return Material(
       color: Colors.transparent,
@@ -60,7 +116,7 @@ class IsrProcessingOverlay extends StatelessWidget {
         children: [
           BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: ColoredBox(color: Colors.black.withValues(alpha: 0.52)),
+            child: ColoredBox(color: Colors.black.withValues(alpha: scrimAlpha)),
           ),
           Center(
             child: Padding(
@@ -68,10 +124,13 @@ class IsrProcessingOverlay extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(20),
-                  color: backgroundColor,
+                  color: cardColor,
+                  border: isDark
+                      ? Border.all(color: scheme.outline.withValues(alpha: 0.25))
+                      : null,
                   boxShadow: [
                     BoxShadow(
-                      color: primaryColor.withValues(alpha: 0.22),
+                      color: primaryColor.withValues(alpha: isDark ? 0.35 : 0.22),
                       blurRadius: 24,
                       offset: const Offset(0, 8),
                     ),
@@ -82,7 +141,7 @@ class IsrProcessingOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _buildHeroAnimation(),
+                      _buildHeroAnimation(context),
                       SizedBox(height: 12.h),
                       Text(
                         title,
@@ -91,7 +150,7 @@ class IsrProcessingOverlay extends StatelessWidget {
                           fontFamily: fontFamily,
                           fontSize: 18.sp,
                           fontWeight: FontWeight.w700,
-                          color: textColor,
+                          color: titleColor,
                           height: 1.25,
                         ),
                       ),
@@ -103,7 +162,7 @@ class IsrProcessingOverlay extends StatelessWidget {
                           fontFamily: fontFamily,
                           fontSize: 14.sp,
                           fontWeight: FontWeight.w400,
-                          color: textColor.withValues(alpha: 0.72),
+                          color: subtitleColor,
                           height: 1.35,
                         ),
                       ),
@@ -128,7 +187,7 @@ class IsrProcessingOverlay extends StatelessWidget {
                             color: primaryColor,
                           ),
                         ),
-                      ] else
+                      ] else if (!_heroUsesAnimatedGif(context))
                         SizedBox(
                           width: 36.w,
                           height: 36.w,

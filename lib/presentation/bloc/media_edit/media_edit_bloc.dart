@@ -27,6 +27,7 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
     on<NavigateToVideoFilterEvent>(_onNavigateToVideoFilter);
     on<NavigateToCoverPhotoEvent>(_onNavigateToCoverPhoto);
     on<ProceedToNextEvent>(_onProceedToNext);
+    on<MediaEditResetProcessingFlagsEvent>(_onResetProcessingFlags);
   }
 
   final List<MediaEditItem> _mediaEditItems = [];
@@ -461,6 +462,12 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
           _mediaEditItems[i] = item.copyWith(editedPath: muxed);
         }
       }
+      emit(MediaEditLoadedState(
+        mediaEditItems: List.from(_mediaEditItems),
+        currentIndex: _currentIndex,
+        isProcessingNext: false,
+        isApplyingSound: false,
+      ));
       emit(MediaEditCompletedState(mediaEditItems: List.from(_mediaEditItems)));
     } catch (_) {
       emit(MediaEditLoadedState(
@@ -468,6 +475,21 @@ class MediaEditBloc extends Bloc<MediaEditEvent, MediaEditState> {
         currentIndex: _currentIndex,
       ));
     }
+  }
+
+  void _onResetProcessingFlags(
+    MediaEditResetProcessingFlagsEvent event,
+    Emitter<MediaEditState> emit,
+  ) {
+    if (state is! MediaEditLoadedState) return;
+    final current = state as MediaEditLoadedState;
+    if (!current.isProcessingNext && !current.isApplyingSound) return;
+    emit(MediaEditLoadedState(
+      mediaEditItems: List.from(_mediaEditItems),
+      currentIndex: _currentIndex,
+      isProcessingNext: false,
+      isApplyingSound: false,
+    ));
   }
 
   int? get pendingRemoveIndex => _pendingRemoveIndex;

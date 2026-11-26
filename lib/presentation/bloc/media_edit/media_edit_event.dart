@@ -97,3 +97,6 @@ class NavigateToCoverPhotoEvent extends MediaEditEvent {
 }
 
 class ProceedToNextEvent extends MediaEditEvent {}
+
+/// Clears overlay flags when returning from the post screen or after navigation.
+class MediaEditResetProcessingFlagsEvent extends MediaEditEvent {}

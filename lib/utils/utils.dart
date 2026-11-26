@@ -19,6 +19,7 @@ export 'isr_post_tap_handler.dart';
 export 'isr_warm_video_handoff.dart';
 export 'isr_size_config.dart';
 export 'media_compressor.dart';
+export 'processing_overlay_lottie.dart';
 export 'media_url_util.dart';
 export 'media_util.dart';
 export 'mention_util.dart';

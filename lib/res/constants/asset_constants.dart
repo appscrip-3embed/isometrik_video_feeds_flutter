@@ -27,6 +27,10 @@ class AssetConstants {
   static const String greenTickIcon = '${packageName}assets/icons/ic_green_tick.svg';
   static const String verifiedSVG = '${packageName}assets/icons/ic_verified.svg';
   static const String heartAnimation = '${packageName}assets/loader/heart_animation.json';
+
+  /// Minimal vertical-reel loader (host may override via [CreateEditPostUIConfig]).
+  static const String reelPreparingMinimal =
+      '${packageName}assets/loader/reel_preparing_minimal.json';
   static const String pausedRoundedSvg = '${packageName}assets/icons/ic_pause_rounded.svg';
   static const String reelsPlaySvg = '${packageName}assets/icons/ic_reels_play.svg';
   static const String icReelsSoundIcon =

@@ -183,6 +183,9 @@ class CreateEditPostUIConfig {
     this.postAttributeUIConfig,
     this.tagPeopleUIConfig,
     this.searchLocationUIConfig,
+    this.processingOverlayLottiePath,
+    this.processingOverlayLottiePathDark,
+    this.processingOverlayLottiePackage,
   });
 
   /// Configuration for media selection screen
@@ -200,12 +203,25 @@ class CreateEditPostUIConfig {
   /// Configuration for search location screen
   final SearchLocationUIConfig? searchLocationUIConfig;
 
+  /// Host asset for create-post preparing overlays (.gif or Lottie JSON).
+  /// Prefer one neutral asset for all themes; [IsrProcessingOverlay] adjusts
+  /// contrast on dark surfaces. When set, [processingOverlayLottiePackage] is
+  /// usually `null` (app bundle).
+  final String? processingOverlayLottiePath;
+
+  /// Deprecated — use a single neutral [processingOverlayLottiePath] only.
+  final String? processingOverlayLottiePathDark;
+  final String? processingOverlayLottiePackage;
+
   CreateEditPostUIConfig copyWith({
     MediaSelectionConfig? mediaSelectionConfig,
     MediaEditConfig? mediaEditConfig,
     PostAttributeUIConfig? postAttributeUIConfig,
     TagPeopleUIConfig? tagPeopleUIConfig,
     SearchLocationUIConfig? searchLocationUIConfig,
+    String? processingOverlayLottiePath,
+    String? processingOverlayLottiePathDark,
+    String? processingOverlayLottiePackage,
   }) =>
       CreateEditPostUIConfig(
         mediaSelectionConfig: mediaSelectionConfig ?? this.mediaSelectionConfig,
@@ -215,6 +231,12 @@ class CreateEditPostUIConfig {
         tagPeopleUIConfig: tagPeopleUIConfig ?? this.tagPeopleUIConfig,
         searchLocationUIConfig:
             searchLocationUIConfig ?? this.searchLocationUIConfig,
+        processingOverlayLottiePath:
+            processingOverlayLottiePath ?? this.processingOverlayLottiePath,
+        processingOverlayLottiePathDark: processingOverlayLottiePathDark ??
+            this.processingOverlayLottiePathDark,
+        processingOverlayLottiePackage: processingOverlayLottiePackage ??
+            this.processingOverlayLottiePackage,
       );
 }
 

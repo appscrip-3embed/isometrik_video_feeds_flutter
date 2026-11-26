@@ -161,6 +161,9 @@ class _MediaEditViewState extends State<MediaEditView>
   void activate() {
     super.activate();
     _resumeImageSoundPreviewIfRouteVisible();
+    if (ModalRoute.of(context)?.isCurrent ?? false) {
+      _bloc.add(MediaEditResetProcessingFlagsEvent());
+    }
   }
 
   Future<void> _stopImageSoundPreview() async {
@@ -505,7 +508,7 @@ class _MediaEditViewState extends State<MediaEditView>
                                 textColor: widget.mediaEditConfig.primaryTextColor,
                                 backgroundColor: widget.mediaEditConfig.whiteColor,
                                 fontFamily: widget.mediaEditConfig.primaryFontFamily,
-                                lottieAsset: AssetConstants.postUploadedAnimation,
+                                useThemeSurfaces: true,
                               ),
                             ),
                         ],

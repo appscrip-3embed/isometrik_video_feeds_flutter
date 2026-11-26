@@ -62,7 +62,8 @@ void _recordTextPostsExcludedFromReels(
     }
     EventQueueProvider.instance.logEvent(EventType.postViewed.value, {
       'post_id': postId,
-      'view_source': 'fyp',
+      // API enum: feed | profile | search | other (not "fyp").
+      'view_source': 'feed',
       'view_duration': 1,
       'view_completion_rate': 0,
       'excluded_from_reels_ui': true,

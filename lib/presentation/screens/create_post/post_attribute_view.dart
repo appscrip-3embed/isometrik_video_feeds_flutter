@@ -425,6 +425,7 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _isPreparingPostPage = false;
     unawaited(_createPostBlocSub?.cancel());
     _createPostBlocSub = null;
     _descriptionController.dispose();
@@ -725,14 +726,9 @@ class _PostAttributeViewState extends State<PostAttributeView> with WidgetsBindi
               title: IsrTranslationFile.preparingNewPost,
               subtitle: IsrTranslationFile.preparingNewPostSubtitle,
               primaryColor: _overlayPrimaryColor,
-              textColor:
-                  _postAttributeConfig?.appBarConfig?.titleStyle?.color ??
-                  IsrColors.primaryTextColor,
-              backgroundColor:
-                  _postAttributeConfig?.scaffoldBackgroundColor ?? Colors.white,
               fontFamily: IsrAppConstants.primaryFontFamily,
               progress: _compressionProgress,
-              lottieAsset: AssetConstants.postUploadedAnimation,
+              useThemeSurfaces: true,
             ),
         ],
       );
