@@ -145,6 +145,11 @@ class IsrTranslationFile {
   static String get useAudio => isrTr('useAudio');
   static String get soundPreviewUnavailable => isrTr('soundPreviewUnavailable');
   static String get soundPreviewPlayFailed => isrTr('soundPreviewPlayFailed');
+  static String get soundPreviewLoading => isrTr('soundPreviewLoading');
+  static String get soundPreviewInitializing =>
+      isrTr('soundPreviewInitializing');
+  static String get soundPreviewLoadTimeout =>
+      isrTr('soundPreviewLoadTimeout');
   static String get soundDetailReelSingular => isrTr('soundDetailReelSingular');
   static String get soundDetailReelsPlural => isrTr('soundDetailReelsPlural');
   static String get soundDetailUntitled => isrTr('soundDetailUntitled');

@@ -1748,6 +1748,8 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
       'settings_is_paid': s?.isPaid,
       'settings_price_amount': s?.priceAmount?.toString(),
       'settings_price_currency': s?.priceCurrency,
+      'sound_title': d.sound?.resolvedTitle,
+      'sound_artist': d.sound?.resolvedArtist,
     };
   }
 

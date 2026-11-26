@@ -30,6 +30,7 @@ export 'post_grid_thumbnail_tile.dart';
 export 'post_shimmer_view.dart';
 export 'post_sound_icon.dart';
 export 'reels_glassy_sound_disc.dart';
+export 'post_sound_metadata_loading_row.dart';
 export 'reels_sound_marquee_row.dart';
 export 'reels_overlay_text.dart';
 export 'report_reason_dialog.dart';

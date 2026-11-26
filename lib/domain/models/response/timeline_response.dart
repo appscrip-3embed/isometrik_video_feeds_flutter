@@ -350,6 +350,11 @@ class TimeLineData {
         rejectedAt: rejectedAt ?? this.rejectedAt,
         isDataIncomplete: isDataIncomplete ?? this.isDataIncomplete,
       )..isFromLocal = isFromLocal ?? this.isFromLocal;
+
+  /// True when the reels/timeline payload has a library sound id but no title
+  /// or artist (detail API returns the full `sound` object).
+  bool get needsSoundDisplayHydration =>
+      sound?.needsDisplayMetadataHydration ?? false;
 }
 
 class PreviewMedia {

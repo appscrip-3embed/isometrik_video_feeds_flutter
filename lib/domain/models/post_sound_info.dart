@@ -53,6 +53,17 @@ class PostSoundInfo {
 
   bool get hasId => id.isNotEmpty;
 
+  /// Timeline/reels list responses often return only `sound_id`. When title and
+  /// artist are missing the UI falls back to [displayLabel] → "Original audio".
+  /// Host/library ids (`snd_*`, not temporary `dub_*`) should be hydrated via
+  /// `GET /api/v1/posts/detail`.
+  bool get needsDisplayMetadataHydration {
+    if (!hasId) return false;
+    final trimmed = id.trim();
+    if (trimmed.isEmpty || trimmed.startsWith('dub_')) return false;
+    return resolvedTitle == null && resolvedArtist == null;
+  }
+
   /// `“Title” • Artist` (or fallbacks) suitable for the post sound pill.
   String get displayLabel {
     final t = resolvedTitle ?? '';

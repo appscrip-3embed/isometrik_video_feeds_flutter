@@ -903,6 +903,16 @@ class IsrVideoReelConfig {
     });
   }
 
+  /// Host hook (e.g. Dubly leaving reels): send queued post views even when
+  /// the queue is smaller than the batch size.
+  static Future<void> flushQueuedPostViewImpressions() async {
+    if (!isSdkInitialize) return;
+    if (!EventQueueProvider.isInitialized) return;
+    await EventQueueProvider.instance.sendPendingEventsToBackend(
+      forcePartialFlush: true,
+    );
+  }
+
   static void registerTalker(Talker talker) {
     IsmInjectionUtils.unRegister<Talker>();
     IsmInjectionUtils.registerOtherClass<Talker>(() => talker);

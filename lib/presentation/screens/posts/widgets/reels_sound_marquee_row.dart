@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ism_video_reel_player/domain/models/post_sound_info.dart';
+import 'package:ism_video_reel_player/presentation/screens/posts/widgets/post_sound_metadata_loading_row.dart';
 import 'package:ism_video_reel_player/presentation/screens/posts/widgets/post_sound_icon.dart';
 import 'package:ism_video_reel_player/presentation/screens/widgets/tap_handler.dart';
 import 'package:ism_video_reel_player/res/res.dart';
@@ -13,6 +14,7 @@ class ReelsSoundMarqueeRow extends StatelessWidget {
     required this.sound,
     required this.textStyle,
     required this.onTap,
+    this.isMetadataLoading = false,
     this.fadeRightEdge = true,
     this.fadeWidth = 36,
   });
@@ -20,6 +22,7 @@ class ReelsSoundMarqueeRow extends StatelessWidget {
   final PostSoundInfo sound;
   final TextStyle textStyle;
   final VoidCallback onTap;
+  final bool isMetadataLoading;
   final bool fadeRightEdge;
   final double fadeWidth;
 
@@ -42,6 +45,11 @@ class ReelsSoundMarqueeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isMetadataLoading && sound.needsDisplayMetadataHydration) {
+      return const PostSoundMetadataLoadingRow(
+        style: PostSoundMetadataLoadingStyle.reels,
+      );
+    }
     final label = sound.glassyMarqueeLabel;
     final lineHeight = (textStyle.fontSize ?? 12) * (textStyle.height ?? 1.2);
 

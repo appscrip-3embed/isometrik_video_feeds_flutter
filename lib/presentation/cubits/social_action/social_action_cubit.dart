@@ -59,21 +59,35 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
 
   TimeLineData? getPostById(String postId) => _uniquePostList[postId];
 
+  /// True while [hydrateIncompletePost] / [getAsyncPostById] is fetching detail.
+  bool isPostDetailHydrationInFlight(String postId) {
+    if (postId.isEmpty) return false;
+    return _inFlightPostDetailsRequests.containsKey(postId);
+  }
+
   List<TimeLineData> getPostList({bool Function(TimeLineData)? filter}) =>
       filter != null
           ? _uniquePostList.values.where(filter).toList()
           : _uniquePostList.values.toList();
 
+  bool _postDetailCacheIsHydrated(TimeLineData? post) {
+    if (post == null) return false;
+    if (post.isDataIncomplete) return false;
+    if (post.needsSoundDisplayHydration) return false;
+    return true;
+  }
+
   Future<TimeLineData?> getAsyncPostById(String postId) async {
     final cached = _uniquePostList[postId];
-    if (cached != null && !cached.isDataIncomplete) {
+    if (_postDetailCacheIsHydrated(cached)) {
       return cached;
     }
 
     return _fetchPostDetailsDeduped(postId);
   }
 
-  /// Fetches full post details when the host seeded an incomplete payload.
+  /// Fetches full post details when the host seeded an incomplete payload, or
+  /// when the timeline/reels API returned only `sound_id` (no `sound` metadata).
   ///
   /// Skips the network call when [_uniquePostList] already has a complete
   /// post, but still notifies listeners so UI showing the incomplete row
@@ -82,7 +96,7 @@ class IsmSocialActionCubit extends Cubit<IsmSocialActionState> {
     if (postId.isEmpty) return null;
 
     final cached = _uniquePostList[postId];
-    if (cached != null && !cached.isDataIncomplete) {
+    if (_postDetailCacheIsHydrated(cached)) {
       emit(IsmPostHydratedActionListenerState(
         postId: postId,
         postData: cached,

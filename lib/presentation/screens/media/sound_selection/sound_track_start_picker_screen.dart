@@ -95,9 +95,11 @@ class _SoundTrackStartPickerScreenState
   final _manualStartFocus = FocusNode();
   StreamSubscription<PlayerState>? _stateSub;
   StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<bool>? _preparingSub;
 
   double _startFraction = 0;
   bool _isPlaying = false;
+  bool _previewPreparing = false;
   bool _wasPlayingBeforeScrub = false;
   double _playbackOffsetSec = 0;
   bool _syncingManualField = false;
@@ -127,6 +129,10 @@ class _SoundTrackStartPickerScreenState
     _stateSub = SoundPickerPreviewAudio.stateStream.listen((state) {
       if (!mounted) return;
       setState(() => _isPlaying = state == PlayerState.playing);
+    });
+    _preparingSub = SoundPickerPreviewAudio.preparingStream.listen((preparing) {
+      if (!mounted) return;
+      setState(() => _previewPreparing = preparing);
     });
     _positionSub = SoundPickerPreviewAudio.positionStream.listen((position) {
       if (!mounted) return;
@@ -193,6 +199,7 @@ class _SoundTrackStartPickerScreenState
   @override
   void dispose() {
     _stateSub?.cancel();
+    _preparingSub?.cancel();
     _positionSub?.cancel();
     _manualStartController.dispose();
     _manualStartFocus.dispose();
@@ -228,6 +235,7 @@ class _SoundTrackStartPickerScreenState
   }
 
   Future<void> _confirmUseSound() async {
+    if (_previewPreparing) return;
     _dismissSearchKeyboard();
     final startSec = _resolveStartTimeForConfirm();
     await _stopAndPop(
@@ -242,6 +250,7 @@ class _SoundTrackStartPickerScreenState
       SoundStartTimeInputUtil.formatSeconds(seconds);
 
   Future<void> _togglePlayback() async {
+    if (_previewPreparing) return;
     if (_previewUrl.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -251,6 +260,7 @@ class _SoundTrackStartPickerScreenState
       return;
     }
     try {
+      await SoundPickerPreviewAudio.claim(_owner);
       setState(() {
         _previewEngaged = true;
         if (!_isPlaying) {
@@ -260,6 +270,19 @@ class _SoundTrackStartPickerScreenState
       await SoundPickerPreviewAudio.togglePreview(
         url: _previewUrl,
         startSeconds: _startOffsetSec,
+      );
+    } on SoundPickerPreviewException catch (error) {
+      if (!mounted) return;
+      final message = error.reason == SoundPickerPreviewFailure.playerNotReady
+          ? IsrTranslationFile.soundPreviewInitializing
+          : IsrTranslationFile.soundPreviewPlayFailed;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(IsrTranslationFile.soundPreviewLoadTimeout)),
       );
     } catch (_) {
       if (mounted) {
@@ -516,16 +539,25 @@ class _SoundTrackStartPickerScreenState
                         shape: const CircleBorder(),
                         child: InkWell(
                           customBorder: const CircleBorder(),
-                          onTap: _togglePlayback,
+                          onTap: _previewPreparing ? null : _togglePlayback,
                           child: Padding(
                             padding: EdgeInsets.all(18.responsiveDimension),
-                            child: Icon(
-                              _isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                              color: accent,
-                              size: 36.responsiveDimension,
-                            ),
+                            child: _previewPreparing
+                                ? SizedBox(
+                                    width: 36.responsiveDimension,
+                                    height: 36.responsiveDimension,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.8,
+                                      color: accent,
+                                    ),
+                                  )
+                                : Icon(
+                                    _isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    color: accent,
+                                    size: 36.responsiveDimension,
+                                  ),
                           ),
                         ),
                       ),
@@ -553,7 +585,9 @@ class _SoundTrackStartPickerScreenState
                           BorderRadius.circular(14.responsiveDimension),
                     ),
                   ),
-                  onPressed: () => unawaited(_confirmUseSound()),
+                  onPressed: _previewPreparing
+                      ? null
+                      : () => unawaited(_confirmUseSound()),
                   child: Text(
                     IsrTranslationFile.useThisSound,
                     style: TextStyle(

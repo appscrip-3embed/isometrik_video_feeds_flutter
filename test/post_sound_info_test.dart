@@ -35,6 +35,22 @@ void main() {
     expect(sound.hasId, isTrue);
   });
 
+  test('needsDisplayMetadataHydration when library id lacks title/artist', () {
+    expect(
+      const PostSoundInfo(id: 'snd_f85da05f4843').needsDisplayMetadataHydration,
+      isTrue,
+    );
+    expect(
+      const PostSoundInfo(id: 'snd_f85da05f4843', title: 'Kesariya')
+          .needsDisplayMetadataHydration,
+      isFalse,
+    );
+    expect(
+      const PostSoundInfo(id: 'dub_temp123').needsDisplayMetadataHydration,
+      isFalse,
+    );
+  });
+
   test('PostSoundInfo.displayLabel falls back to artist or default', () {
     expect(
       const PostSoundInfo(id: 'id', artist: 'Adele').displayLabel,

@@ -103,6 +103,7 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
   static const Duration _kMetaAlternatorInterval = Duration(seconds: 3);
   Timer? _likeAnimationTimer;
   bool _isLiked = false;
+  bool _soundMetadataLoading = false;
   void Function({
     ReelsData? reelData,
     PostSectionType? postSectionType,
@@ -664,15 +665,40 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
       unawaited(_syncImageSoundPlayback());
     });
     _startMetaAlternatorIfNeeded();
+    _soundMetadataLoading =
+        widget.reelsData.sound?.needsDisplayMetadataHydration ?? false;
     unawaited(_hydrateIncompletePostIfNeeded());
   }
 
+  bool get _showSoundMetadataLoading =>
+      _soundMetadataLoading &&
+      (_reel.sound?.needsDisplayMetadataHydration ?? false);
+
   Future<void> _hydrateIncompletePostIfNeeded() async {
-    if (widget.reelsData.isDataIncomplete != true) return;
+    final needsDetail = widget.reelsData.isDataIncomplete == true ||
+        (widget.reelsData.sound?.needsDisplayMetadataHydration ?? false);
+    if (!needsDetail) {
+      if (_soundMetadataLoading && mounted) {
+        setState(() => _soundMetadataLoading = false);
+      }
+      return;
+    }
     final postId = widget.reelsData.postId;
     if (postId == null || postId.isEmpty) return;
     if (!mounted) return;
-    await context.getOrCreateBloc<IsmSocialActionCubit>().hydrateIncompletePost(postId);
+    setState(() => _soundMetadataLoading = true);
+    try {
+      await context
+          .getOrCreateBloc<IsmSocialActionCubit>()
+          .hydrateIncompletePost(postId);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _soundMetadataLoading =
+              _reel.sound?.needsDisplayMetadataHydration ?? false;
+        });
+      }
+    }
   }
 
   bool _mayPlayFeedMedia() =>
@@ -724,10 +750,15 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
         unawaited(_syncImageSoundPlayback());
       }
     }
+    if (widget.reelsData.sound?.needsDisplayMetadataHydration != true) {
+      _soundMetadataLoading = false;
+    }
     if (oldWidget.reelsData.postId != widget.reelsData.postId) {
       _isInstagramCaptionExpanded = false;
       _metaAlternatorShowsSound.value = true;
       _startMetaAlternatorIfNeeded();
+      _soundMetadataLoading =
+          widget.reelsData.sound?.needsDisplayMetadataHydration ?? false;
     }
   }
 
@@ -1196,6 +1227,7 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
   }
 
   Future<void> _openSoundDetails() async {
+    if (_showSoundMetadataLoading) return;
     final sound = _reel.sound;
     if (sound == null || !sound.hasId) return;
 
@@ -1228,6 +1260,7 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
   }
 
   void _onTapInstagramHeaderMeta() {
+    if (_showSoundMetadataLoading) return;
     if (_hasAlternatingInstagramMeta) {
       unawaited(_showInstagramMetaActionMenuPopup());
       return;
@@ -1427,6 +1460,14 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
     final locationLabel =
         _locationLabel ?? _reel.placeDataList?.firstOrNull?.placeName ?? '';
 
+    final soundLoadingRow = PostSoundMetadataLoadingRow(
+      style: onMediaOverlay
+          ? PostSoundMetadataLoadingStyle.reels
+          : PostSoundMetadataLoadingStyle.feedInline,
+      textShimmerWidth: 104,
+      textShimmerHeight: IsrDimens.twelve.toDouble(),
+    );
+
     Widget content;
     if (_hasAlternatingInstagramMeta) {
       final locationRow = buildRow(
@@ -1434,15 +1475,20 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
         icon: Icons.location_on_rounded,
         label: locationLabel,
       );
-      final soundRow = buildRow(
-        key: const ValueKey('instagram_meta_sound'),
-        leading: PostSoundIcon(
-          size: IsrDimens.twelve,
-          style: PostSoundIconStyle.feed,
-          color: iconColor,
-        ),
-        label: sound?.displayLabel ?? '',
-      );
+      final soundRow = _showSoundMetadataLoading
+          ? KeyedSubtree(
+              key: const ValueKey('instagram_meta_sound_loading'),
+              child: soundLoadingRow,
+            )
+          : buildRow(
+              key: const ValueKey('instagram_meta_sound'),
+              leading: PostSoundIcon(
+                size: IsrDimens.twelve,
+                style: PostSoundIconStyle.feed,
+                color: iconColor,
+              ),
+              label: sound?.displayLabel ?? '',
+            );
       content = ValueListenableBuilder<bool>(
         valueListenable: _metaAlternatorShowsSound,
         builder: (context, showsSound, _) => InstagramMetaVerticalScroll(
@@ -1452,15 +1498,17 @@ class _IsmPostFeedCardViewState extends State<IsmPostFeedCardView> {
         ),
       );
     } else if (_hasPostSound) {
-      content = buildRow(
-        key: const ValueKey('instagram_meta_sound_only'),
-        leading: PostSoundIcon(
-          size: IsrDimens.twelve,
-          style: PostSoundIconStyle.feed,
-          color: iconColor,
-        ),
-        label: sound?.displayLabel ?? '',
-      );
+      content = _showSoundMetadataLoading
+          ? soundLoadingRow
+          : buildRow(
+              key: const ValueKey('instagram_meta_sound_only'),
+              leading: PostSoundIcon(
+                size: IsrDimens.twelve,
+                style: PostSoundIconStyle.feed,
+                color: iconColor,
+              ),
+              label: sound?.displayLabel ?? '',
+            );
     } else {
       content = buildRow(
         key: const ValueKey('instagram_meta_location_only'),

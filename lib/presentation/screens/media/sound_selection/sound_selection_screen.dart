@@ -287,6 +287,7 @@ class SoundListSection extends StatelessWidget {
     required this.isTrackSaveLoading,
     required this.onToggleSave,
     this.activeTrackId,
+    this.previewPreparingTrackId,
     this.collapsedLimit,
     this.onViewAll,
   });
@@ -298,6 +299,7 @@ class SoundListSection extends StatelessWidget {
   final bool Function(String trackId) isTrackSaveLoading;
   final Future<void> Function(SoundTrack track) onToggleSave;
   final String? activeTrackId;
+  final String? previewPreparingTrackId;
   final int? collapsedLimit;
   final VoidCallback? onViewAll;
 
@@ -392,6 +394,18 @@ class SoundListSection extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (previewPreparingTrackId == t.id)
+                      Padding(
+                        padding: EdgeInsets.only(right: 4.responsiveDimension),
+                        child: SizedBox(
+                          width: 22.responsiveDimension,
+                          height: 22.responsiveDimension,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: st.selectionAccent,
+                          ),
+                        ),
+                      ),
                     TapHandler(
                       onTap: () => onToggleSave(t),
                       child: SizedBox(

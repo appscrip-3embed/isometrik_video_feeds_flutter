@@ -38,12 +38,16 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   late final SoundLibraryUseCase _useCase;
   final Object _previewOwner = Object();
   StreamSubscription<PlayerState>? _playerStateSub;
+  StreamSubscription<bool>? _previewPreparingSub;
+  Future<void>? _previewClaimFuture;
 
   String _query = '';
   String? _categoryId;
   String _activeSection = 'all';
   SoundTrack? _activeTrack;
   bool _isPlaying = false;
+  bool _previewPreparing = false;
+  String? _previewPreparingTrackId;
   bool _loading = true;
   String? _error;
 
@@ -88,10 +92,21 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     WidgetsBinding.instance.addObserver(this);
     _useCase = IsmInjectionUtils.getUseCase<SoundLibraryUseCase>();
     _listScrollController.addListener(_onListScroll);
-    unawaited(SoundPickerPreviewAudio.claim(_previewOwner));
+    _previewClaimFuture = SoundPickerPreviewAudio.claim(_previewOwner);
+    unawaited(_previewClaimFuture);
     _playerStateSub = SoundPickerPreviewAudio.stateStream.listen((state) {
       if (!mounted) return;
       setState(() => _isPlaying = state == PlayerState.playing);
+    });
+    _previewPreparingSub =
+        SoundPickerPreviewAudio.preparingStream.listen((preparing) {
+      if (!mounted) return;
+      setState(() {
+        _previewPreparing = preparing;
+        if (!preparing) {
+          _previewPreparingTrackId = null;
+        }
+      });
     });
     unawaited(_loadSections());
   }
@@ -104,6 +119,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     _listScrollController.removeListener(_onListScroll);
     _listScrollController.dispose();
     _playerStateSub?.cancel();
+    _previewPreparingSub?.cancel();
     unawaited(SoundPickerPreviewAudio.shutdown());
     super.dispose();
   }
@@ -214,6 +230,31 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   List<SoundTrack> _filter(List<SoundTrack> list) =>
       list.where(_matchesCategory).toList();
 
+  Future<void> _ensurePreviewPlayerReady() async {
+    final pending = _previewClaimFuture;
+    if (pending != null) {
+      await pending;
+    } else {
+      _previewClaimFuture = SoundPickerPreviewAudio.claim(_previewOwner);
+      await _previewClaimFuture;
+    }
+  }
+
+  String _previewErrorMessage(Object error) {
+    if (error is SoundPickerPreviewException) {
+      return switch (error.reason) {
+        SoundPickerPreviewFailure.playerNotReady =>
+          IsrTranslationFile.soundPreviewInitializing,
+        SoundPickerPreviewFailure.loadFailed =>
+          IsrTranslationFile.soundPreviewPlayFailed,
+      };
+    }
+    if (error is TimeoutException) {
+      return IsrTranslationFile.soundPreviewLoadTimeout;
+    }
+    return IsrTranslationFile.soundPreviewPlayFailed;
+  }
+
   Future<void> _toggleTrackPreview(SoundTrack track) async {
     _dismissSearchKeyboard();
     final previewUrl = track.trackUrl.trim();
@@ -226,6 +267,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     }
 
     if (_activeTrack?.id == track.id) {
+      if (_previewPreparing) return;
       if (_isPlaying) {
         await SoundPickerPreviewAudio.pause();
       } else {
@@ -237,20 +279,43 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
     setState(() {
       _activeTrack = track;
       _isPlaying = false;
+      _previewPreparingTrackId = track.id;
     });
     try {
+      await _ensurePreviewPlayerReady();
       final uri = Uri.tryParse(previewUrl);
       if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
         throw FormatException('Invalid preview URL: $previewUrl');
       }
       await SoundPickerPreviewAudio.playListPreview(previewUrl);
+    } on SoundPickerPreviewException catch (error) {
+      if (error.reason == SoundPickerPreviewFailure.playerNotReady) {
+        try {
+          await _ensurePreviewPlayerReady();
+          await SoundPickerPreviewAudio.playListPreview(previewUrl);
+          return;
+        } catch (retryError, stackTrace) {
+          debugPrint('Sound preview retry failed for $previewUrl');
+          debugPrint('Preview error: $retryError');
+          debugPrintStack(stackTrace: stackTrace);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_previewErrorMessage(retryError))),
+          );
+          return;
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_previewErrorMessage(error))),
+      );
     } catch (error, stackTrace) {
       debugPrint('Sound preview failed for $previewUrl');
       debugPrint('Preview error: $error');
       debugPrintStack(stackTrace: stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(IsrTranslationFile.soundPreviewPlayFailed)),
+        SnackBar(content: Text(_previewErrorMessage(error))),
       );
     }
   }
@@ -416,6 +481,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
   }
 
   Future<void> _useSelectedSound() async {
+    if (_previewPreparing) return;
     _dismissSearchKeyboard();
     final track = _activeTrack;
     if (track == null) return;
@@ -595,22 +661,40 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                         ),
                       ),
                       IconButton(
-                        onPressed: _toggleMiniPlayerPlayback,
-                        icon: Icon(
-                          _isPlaying ? Icons.pause : Icons.play_arrow_rounded,
-                          color: Colors.white,
-                          size: 22.responsiveDimension,
-                        ),
+                        onPressed:
+                            _previewPreparing ? null : _toggleMiniPlayerPlayback,
+                        icon: _previewPreparing
+                            ? SizedBox(
+                                width: 22.responsiveDimension,
+                                height: 22.responsiveDimension,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white.withValues(alpha: 0.95),
+                                ),
+                              )
+                            : Icon(
+                                _isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 22.responsiveDimension,
+                              ),
                       ),
-                      TapHandler(
-                        onTap: _useSelectedSound,
-                        child: CircleAvatar(
-                          radius: 16.responsiveDimension,
-                          backgroundColor: Colors.white.withValues(alpha: 0.95),
-                          child: Icon(
-                            Icons.arrow_forward_rounded,
-                            color: st.selectionAccent,
-                            size: 20.responsiveDimension,
+                      Opacity(
+                        opacity: _previewPreparing ? 0.45 : 1,
+                        child: TapHandler(
+                          onTap: _previewPreparing
+                              ? null
+                              : () => unawaited(_useSelectedSound()),
+                          child: CircleAvatar(
+                            radius: 16.responsiveDimension,
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.95),
+                            child: Icon(
+                              Icons.arrow_forward_rounded,
+                              color: st.selectionAccent,
+                              size: 20.responsiveDimension,
+                            ),
                           ),
                         ),
                       ),
@@ -821,6 +905,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                               ),
                             if (_loadingMore)
                               Padding(
@@ -849,6 +934,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                                 collapsedLimit:
                                     _activeSection == 'all' ? 3 : null,
                                 onViewAll: _activeSection == 'all'
@@ -864,6 +950,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                                 collapsedLimit:
                                     _activeSection == 'all' ? 3 : null,
                                 onViewAll: _activeSection == 'all'
@@ -880,6 +967,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                                 collapsedLimit:
                                     _activeSection == 'all' ? 3 : null,
                                 onViewAll: _activeSection == 'all'
@@ -896,6 +984,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                                 collapsedLimit:
                                     _activeSection == 'all' ? 3 : null,
                                 onViewAll: _activeSection == 'all'
@@ -919,6 +1008,7 @@ class _SoundSelectionApiBodyState extends State<SoundSelectionApiBody>
                                 isTrackSaveLoading: _isTrackSaveLoading,
                                 onToggleSave: _toggleSavedTrack,
                                 activeTrackId: _activeTrack?.id,
+                                previewPreparingTrackId: _previewPreparingTrackId,
                               ),
                             if (_activeSection != 'all' && _loadingMore)
                               Padding(

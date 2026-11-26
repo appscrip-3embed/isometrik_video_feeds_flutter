@@ -322,6 +322,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   int _floatingCommentsTotal = 0;
   bool _hasFetchedFloatingComments = false;
 
+  /// Shown instead of "Original audio" while post detail hydrates `sound`.
+  bool _soundMetadataLoading = false;
+
   bool _showLikeAnimation = false;
   Timer? _likeAnimationTimer;
   bool _showMuteAnimation = false;
@@ -483,6 +486,9 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   /// clearing floating comments (host-cache silent detail refresh).
   void _applySoftReelDataUpdate(ReelsData data) {
     _reelData = data;
+    if (data.sound?.needsDisplayMetadataHydration != true) {
+      _soundMetadataLoading = false;
+    }
     _postDescription = data.description ?? '';
     _mentionedDataList = data.mentions;
     _taggedDataList = data.tagDataList ?? [];
@@ -640,6 +646,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
 
   void _onStartInit() async {
     _reelData = widget.reelsData!;
+    _soundMetadataLoading =
+        _reelData.sound?.needsDisplayMetadataHydration ?? false;
 
     final session = widget.playbackSession;
     final mediaCount = _reelData.mediaMetaDataList.length;
@@ -685,12 +693,35 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     unawaited(_hydrateIncompletePostIfNeeded());
   }
 
+  bool get _showSoundMetadataLoading =>
+      _soundMetadataLoading &&
+      (_reelData.sound?.needsDisplayMetadataHydration ?? false);
+
   Future<void> _hydrateIncompletePostIfNeeded() async {
-    if (_reelData.isDataIncomplete != true) return;
+    final needsDetail = _reelData.isDataIncomplete == true ||
+        (_reelData.sound?.needsDisplayMetadataHydration ?? false);
+    if (!needsDetail) {
+      if (_soundMetadataLoading && mounted) {
+        setState(() => _soundMetadataLoading = false);
+      }
+      return;
+    }
     final postId = _reelData.postId;
     if (postId == null || postId.isEmpty) return;
     if (!mounted) return;
-    await context.getOrCreateBloc<IsmSocialActionCubit>().hydrateIncompletePost(postId);
+    setState(() => _soundMetadataLoading = true);
+    try {
+      await context
+          .getOrCreateBloc<IsmSocialActionCubit>()
+          .hydrateIncompletePost(postId);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _soundMetadataLoading =
+              _reelData.sound?.needsDisplayMetadataHydration ?? false;
+        });
+      }
+    }
   }
 
   Future<void> _fetchFloatingCommentsIfNeeded(
@@ -1944,6 +1975,11 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   Widget _buildPostSoundRow() {
     final sound = _reelData.sound;
     if (sound == null || !sound.hasId) return const SizedBox.shrink();
+    if (_showSoundMetadataLoading) {
+      return const PostSoundMetadataLoadingRow(
+        style: PostSoundMetadataLoadingStyle.reels,
+      );
+    }
     final title = (sound.title ?? '').trim();
     final label = title.isNotEmpty ? title : sound.displayLabel;
     final thumbUrl = _soundThumbnailUrl(sound);
@@ -1974,6 +2010,7 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   }
 
   Future<void> _onTapPostSound() async {
+    if (_showSoundMetadataLoading) return;
     final postData = _reelData.postData is TimeLineData
         ? _reelData.postData as TimeLineData
         : null;

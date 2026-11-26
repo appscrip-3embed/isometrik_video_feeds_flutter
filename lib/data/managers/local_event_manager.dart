@@ -270,6 +270,10 @@ class LocalEventQueue with WidgetsBindingObserver {
     }
   }
 
+  /// Drains queued post views even when fewer than [_batchSize] (e.g. user left reels).
+  Future<void> flushPendingPostViews() =>
+      sendPendingEventsToBackend(forcePartialFlush: true);
+
   /// Sends queued post-view impressions to `/api/v1/views`.
   ///
   /// By default only POSTs when the queue has at least [_batchSize] events; each
