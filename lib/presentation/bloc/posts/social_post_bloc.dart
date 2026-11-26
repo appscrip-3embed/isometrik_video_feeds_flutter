@@ -131,6 +131,10 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
   bool hasMorePagesForTab(PostSectionType tab) =>
       _getTabAssistData(tab).hasMorePages;
 
+  /// Authoritative in-memory list for a tab (API + pagination, de-duped).
+  List<TimeLineData> postListForSection(PostSectionType tab) =>
+      List<TimeLineData>.from(_getTabAssistData(tab).postList);
+
   bool hasTabAssistData(PostSectionType tab) =>
       _postsByTab.any((t) => t.postSectionType == tab);
 
@@ -176,6 +180,10 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
     required bool feedHostCacheOn,
   }) {
     if (!feedHostCacheOn || isrFollowSensitivePostSection(type)) {
+      return false;
+    }
+    // Cursor feeds (FYP/trending) always take the API list as source of truth.
+    if (_usesCursorPagination(type)) {
       return false;
     }
     return mergeWithExisting || isFromRefresh;
@@ -461,13 +469,17 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
         }
         if (postTab.postSectionType != PostSectionType.multiplePost &&
             (!postTab.postSectionType.isUserDependent || isUserLoggedIn)) {
+          // FYP/Trending are cursor feeds: first page must replace seeds, not
+          // merge — otherwise Hive-only ids linger as "skipped" ghosts.
+          final mergeSeed = hasSeededList &&
+              !_usesCursorPagination(postTab.postSectionType);
           await _callGetTabPost(
             postTab,
             false,
             false,
             false,
             null,
-            mergeWithExisting: hasSeededList,
+            mergeWithExisting: mergeSeed,
           );
         }
       }
@@ -500,10 +512,8 @@ class SocialPostBloc extends Bloc<SocialPostEvent, SocialPostState> {
       event.isLoading,
       event.onComplete,
     );
-    if (event.onComplete == null) {
-      await _emitLoadedPosts(emit, event.postSectionType, tab.postList);
-      _socialActionCubit.updatePostList(tab.postList);
-    }
+    await _emitLoadedPosts(emit, event.postSectionType, tab.postList);
+    _socialActionCubit.updatePostList(tab.postList);
   }
 
   FutureOr<void> _getTimeLinePost(

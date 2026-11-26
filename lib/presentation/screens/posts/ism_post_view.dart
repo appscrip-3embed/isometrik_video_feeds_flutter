@@ -636,30 +636,11 @@ class _PostViewState extends State<IsmPostView>
                             tabStateData?.isLoading = false;
                             return;
                           }
-                          final existing = tabData.reelsDataList;
-                          final incoming = state.postList;
-                          if (existing.isEmpty) {
-                            tabData.reelsDataList = incoming.toList();
-                          } else if (incoming.length >= existing.length) {
-                            tabData.reelsDataList = incoming.toList();
-                          } else {
-                            final existingIds = existing
-                                .map((p) => p.id)
-                                .whereType<String>()
-                                .toSet();
-                            final newOnly = incoming
-                                .where((p) =>
-                                    p.id != null &&
-                                    p.id!.isNotEmpty &&
-                                    !existingIds.contains(p.id))
-                                .toList();
-                            if (newOnly.isNotEmpty) {
-                              tabData.reelsDataList = [
-                                ...newOnly,
-                                ...existing,
-                              ];
-                            }
-                          }
+                          // [SocialPostBloc] already merges host-cache + API; the
+                          // emitted list is authoritative. Do not re-merge here:
+                          // seeded Hive rows can outnumber the first FYP page and
+                          // would stick around as non-API posts.
+                          tabData.reelsDataList = state.postList.toList();
                           _pinSeededPostFirst(tabData);
                         }
                         _mappedReelsByTab.remove(state.postType);
@@ -1288,44 +1269,29 @@ class _PostViewState extends State<IsmPostView>
         postSectionType: section,
         memberUserId: '',
         onComplete: (value) {
-          // Bloc merges pagination into postList before this callback. When
-          // postList still aliases tab reelsDataList, filtering `value` against
-          // the timeline here yields an empty page and the UI never grows.
-          final pageItems = List<TimeLineData>.from(value);
-          final timeline = tabState.tabDataModel.reelsDataList;
-          if (tabState.tabDataModel.allowDuplicatePostInList) {
-            if (pageItems.isNotEmpty) {
-              timeline.addAll(pageItems);
-            }
-          } else {
-            final existingIds = timeline
-                .map((post) => post.id)
-                .where((id) => id != null && id.isNotEmpty)
-                .toSet();
-            final timelineOnly = pageItems
-                .where((post) =>
-                    post.id == null ||
-                    post.id!.isEmpty ||
-                    !existingIds.contains(post.id))
-                .toList();
-            if (timelineOnly.isNotEmpty) {
-              timeline.addAll(timelineOnly);
-            }
-          }
+          // Mirror bloc tab list only — never append onto Hive-seeded rows (those
+          // ids show as "skipped" in the API but would stay in the feed tail).
+          final authoritative =
+              _socialPostBloc.postListForSection(section);
+          tabState.tabDataModel.reelsDataList = authoritative;
           _pinSeededPostFirst(tabState.tabDataModel);
           _mappedReelsByTab.remove(section);
           _mappedReelsVersionByTab.remove(section);
           if (!completer.isCompleted) {
-            completer.complete(pageItems);
+            completer.complete(List<TimeLineData>.from(value));
           }
         },
       ));
-      final timeLinePostList = await completer.future;
+      await completer.future;
       final nextHasMore = _socialPostBloc.hasMorePagesForTab(section);
-      if (timeLinePostList.isEmpty) {
+      if (mounted) {
+        setState(() {});
+      }
+      final displayed = tabState.tabDataModel.reelsDataList;
+      if (displayed.isEmpty) {
         return PostFeedLoadMoreResult(items: const [], hasMore: nextHasMore);
       }
-      final timeLineReelDataList = timeLinePostList
+      final timeLineReelDataList = displayed
           .map((post) => getReelData(post, loggedInUserId: _loggedInUserId))
           .toList();
       return PostFeedLoadMoreResult(
@@ -1837,10 +1803,13 @@ class _PostViewState extends State<IsmPostView>
       postSectionType: tabState.tabDataModel.postSectionType,
       memberUserId: '',
       onComplete: (postDataList) async {
-        tabState.tabDataModel.reelsDataList
-          ..clear()
-          ..addAll(postDataList);
+        tabState.tabDataModel.reelsDataList =
+            _socialPostBloc.postListForSection(
+          tabState.tabDataModel.postSectionType,
+        );
         tabState.isLoading = false;
+        _mappedReelsByTab.remove(tabState.tabDataModel.postSectionType);
+        _mappedReelsVersionByTab.remove(tabState.tabDataModel.postSectionType);
         completer.complete(true);
       },
     ));

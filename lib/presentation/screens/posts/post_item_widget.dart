@@ -655,20 +655,11 @@ class _PostItemWidgetState extends State<PostItemWidget>
         onTapPlaceHolder: widget.onTapPlaceHolder,
         onReelsChange: widget.reelsConfig.onReelsChange,
         onLoadMore: () async {
-          final allowDuplicates = widget.allowDuplicatePostInList;
           if (widget.onPostFeedLoadMore != null) {
             final result = await widget.onPostFeedLoadMore!();
-            if (result.items.isNotEmpty) {
-              final appended = allowDuplicates
-                  ? result.items
-                  : result.items
-                      .where((reel) => !_reelsDataList
-                          .any((existing) => existing.postId == reel.postId))
-                      .toList();
-              if (appended.isNotEmpty) {
-                _reelsDataList.addAll(appended);
-                _updateState();
-              }
+            if (mounted) {
+              _reelsDataList = List<ReelsData>.from(widget.reelsDataList);
+              _updateState();
             }
             return result;
           }
@@ -676,21 +667,12 @@ class _PostItemWidgetState extends State<PostItemWidget>
             return const PostFeedLoadMoreResult(items: [], hasMore: false);
           }
           final value = await widget.onLoadMore!();
-          if (value.isListEmptyOrNull) {
-            return const PostFeedLoadMoreResult(items: [], hasMore: false);
-          }
-          final newReels = allowDuplicates
-              ? value
-              : value
-                  .where((newReel) => !_reelsDataList
-                      .any((existing) => existing.postId == newReel.postId))
-                  .toList();
-          if (newReels.isNotEmpty) {
-            _reelsDataList.addAll(newReels);
+          if (mounted) {
+            _reelsDataList = List<ReelsData>.from(widget.reelsDataList);
             _updateState();
           }
           return PostFeedLoadMoreResult(
-            items: newReels.toList(),
+            items: List<ReelsData>.from(_reelsDataList),
             hasMore: value.length >= 20,
           );
         },
@@ -997,13 +979,7 @@ class _PostItemWidgetState extends State<PostItemWidget>
     _reelsLoadMoreInFlight = true;
     widget.onLoadMore!().then((value) {
       if (!mounted) return;
-      if (value.isListEmptyOrNull) return;
-      final allowDuplicates = widget.allowDuplicatePostInList;
-      final newReels = allowDuplicates
-          ? value
-          : value.where((newReel) => !_reelsDataList
-              .any((existingReel) => existingReel.postId == newReel.postId));
-      _reelsDataList.addAll(newReels);
+      _reelsDataList = List<ReelsData>.from(widget.reelsDataList);
       if (_reelsDataList.isNotEmpty) {
         unawaited(_doMediaCaching(0));
         _warmReelsAroundIndex(_resolvedCurrentPageIndex);
