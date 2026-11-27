@@ -155,6 +155,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   // to see if the player has played at least once
   bool _hasPlayed = false;
 
+  /// Thumbnail stays on top until AVPlayer/ExoPlayer has a paintable frame.
+  /// Reuse: do not hide the cover on [initialize] alone — iOS textures often
+  /// paint black for 1–N frames after init (quick shutter between thumb & video).
+  bool _firstFrameReady = false;
+
   bool _isVideoCompleted = false;
   bool _appliedInitialSeek = false;
   Duration? _pendingSeek;
@@ -176,6 +181,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       (_hasPlayed ||
           _videoPlayerController!.position.inMilliseconds > 0 ||
           (!widget.isPreloaded && !widget.warmDecoderWhilePreloaded));
+
+  /// Cover the native surface until the first decoded frame (avoids black flash).
+  bool get _shouldShowThumbnailCover {
+    if (widget.releaseSurface) return false;
+    if (widget.thumbnailUrl.trim().isEmpty) return false;
+    if (_firstFrameReady) return false;
+    return true;
+  }
 
   bool get _parentWantsVisible => widget.isParentVisible?.call() ?? true;
 
@@ -273,11 +286,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       _isVisibilityConfigured = true;
     }
     _hasPlayed = false;
+    _firstFrameReady = false;
     final handoff = widget.initialHandoff;
     if (handoff != null) {
       _memoryReleased = false;
       _videoPlayerController = handoff.controller;
       _hasPlayed = handoff.hadPlayed || handoff.position.inMilliseconds > 0;
+      // Mid-play handoff already has frames — skip cover. Cold handoff keeps thumb.
+      _firstFrameReady = handoff.position.inMilliseconds > 0;
       _isManuallyPaused = handoff.wasManuallyPaused;
       _isInitializing = false;
       if (handoff.controller.isInitialized && !handoff.controller.isDisposed) {
@@ -393,6 +409,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _adoptController(cached);
     _isInitialized = true;
     _hasPlayed = true;
+    // Warm decoder can be initialized but still black on iOS — keep thumb cover
+    // until [position] advances / first frame is confirmed.
+    _firstFrameReady = cached.position.inMilliseconds > 0;
   }
 
   void _adoptController(IVideoPlayerController controller) {
@@ -906,6 +925,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _skipDisposeTeardown = false;
     _videoPlayerController = controller;
     _hasPlayed = snapshot.hadPlayed || snapshot.position.inMilliseconds > 0;
+    _firstFrameReady = snapshot.position.inMilliseconds > 0;
     _isManuallyPaused = snapshot.wasManuallyPaused;
     _isInitializing = false;
     _pendingBlocResume = false;
@@ -1120,6 +1140,37 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _runWhenSafeToNotify(_applyPlaybackProgress);
   }
 
+  /// Drops the thumbnail cover once the native player has advanced past t=0.
+  ///
+  /// On iOS, wait two frames after that so the texture can paint before the
+  /// cover disappears (avoids the black shutter between thumb and video).
+  void _maybeRevealFirstFrame() {
+    if (_firstFrameReady || _isDisposed || !mounted) return;
+    final controller = _videoPlayerController;
+    if (controller == null ||
+        !controller.isInitialized ||
+        controller.isDisposed) {
+      return;
+    }
+    // Position > 0 means at least one decoded frame was presented.
+    if (controller.position.inMilliseconds <= 0) return;
+
+    void commit() {
+      if (_isDisposed || !mounted || _firstFrameReady) return;
+      setState(() => _firstFrameReady = true);
+    }
+
+    final isCupertino = defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS;
+    if (isCupertino) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => commit());
+      });
+    } else {
+      commit();
+    }
+  }
+
   void _applyPlaybackProgress() {
     if (_isDisposed ||
         !mounted ||
@@ -1153,6 +1204,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         });
       }
     }
+    _maybeRevealFirstFrame();
+
     // Track maximum watch position for analytics
     if (position.inMilliseconds > _maxWatchPosition.inMilliseconds) {
       _maxWatchPosition = position;
@@ -1497,6 +1550,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
     _isInitialized = false;
     _hasPlayed = false;
+    _firstFrameReady = false;
     _hasLoggedVideoStarted = false;
     _loggedProgressMilestones.clear();
     _maxWatchPosition = Duration.zero;
@@ -1805,6 +1859,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       final oldUrl = oldWidget.mediaUrl;
       _videoPlayerController = null;
       _hasPlayed = false;
+      _firstFrameReady = false;
       _isInitialized = false;
       _isInitializing = false;
       _initRetryCount = 0;
@@ -1946,28 +2001,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
             fit: StackFit.expand,
             alignment: Alignment.center,
             children: [
-              // Note: Don't check _isDisposed here - build() is only called when widget is active
-              if (_shouldShowVideoSurface && !widget.releaseSurface) ...[
-                // Video is ready, show the player
-                // Use SizedBox.expand to fill available space when video size is 0
+              // Native surface under the thumb — start decoding while cover stays up.
+              if (_shouldShowVideoSurface && !widget.releaseSurface)
                 Builder(
                   builder: (context) {
-                    // Safety check: verify controller is still valid before building
                     if (_videoPlayerController == null ||
                         !_videoPlayerController!.isInitialized ||
                         _videoPlayerController!.isDisposed) {
-                      // Return thumbnail as fallback if controller becomes invalid
-                      return Container(
-                        color: Colors.black,
-                        child: _buildThumbnailWidget(context),
-                      );
+                      return const SizedBox.shrink();
                     }
 
                     final size = _videoPlayerController!.videoSize;
                     final hasValidSize = size.width > 0 && size.height > 0;
 
-                    // If video size is valid, use FittedBox for proper scaling
-                    // Portrait (h > w) -> fill screen; square/landscape (h <= w) -> fit screen
                     if (hasValidSize) {
                       final aspect = _videoPlayerController!.aspectRatio;
                       final videoFit = _resolveDisplayFit(videoSize: size);
@@ -1994,8 +2040,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                       );
                     }
 
-                    // Fallback: Video size not available yet, fill the available space
-                    // This ensures video is visible even if dimensions aren't reported
                     if (kDebugMode) {
                       debugPrint(
                           '🎬 VideoPlayerWidget: Using fallback layout (size: $size)');
@@ -2011,8 +2055,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                     );
                   },
                 ),
-              ] else ...[
-                // Video is not ready, show thumbnail with loading indicator
+              // Thumbnail cover until first frame (prevents iOS black shutter).
+              if (_shouldShowThumbnailCover ||
+                  !(_shouldShowVideoSurface && !widget.releaseSurface))
                 Container(
                   color: Colors.black,
                   child: Stack(
@@ -2032,7 +2077,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                     ],
                   ),
                 ),
-              ],
             ],
           ),
         ),
