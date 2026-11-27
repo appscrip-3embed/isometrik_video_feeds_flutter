@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Offset;
 
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
@@ -26,6 +27,8 @@ abstract final class DuetComposer {
     required DuetLayout layout,
     /// Horizontal flip on the user clip (front-camera duet recordings).
     bool flipUserClipHorizontally = false,
+    /// PiP only — same 0–1 offset as [DuetStage] (default bottom-right).
+    Offset pipNormalizedOffset = DuetLayoutGeometry.pipDefaultNormalizedOffset,
     void Function(double progress)? onProgress,
   }) async {
     final original = File(originalPath);
@@ -52,6 +55,7 @@ abstract final class DuetComposer {
         outPath,
         layout,
         flipUserClipHorizontally: flipUserClipHorizontally,
+        pipNormalizedOffset: pipNormalizedOffset,
         audioMode: _AudioMode.originalOnly,
       ),
       _buildCommand(
@@ -60,6 +64,7 @@ abstract final class DuetComposer {
         outPath,
         layout,
         flipUserClipHorizontally: flipUserClipHorizontally,
+        pipNormalizedOffset: pipNormalizedOffset,
         audioMode: _AudioMode.silent,
       ),
     ];
@@ -98,11 +103,13 @@ abstract final class DuetComposer {
     String outPath,
     DuetLayout layout, {
     required bool flipUserClipHorizontally,
+    required Offset pipNormalizedOffset,
     required _AudioMode audioMode,
   }) {
     final videoGraph = _videoFilter(
       layout,
       flipUserClipHorizontally: flipUserClipHorizontally,
+      pipNormalizedOffset: pipNormalizedOffset,
     );
     switch (audioMode) {
       case _AudioMode.originalOnly:
@@ -123,38 +130,48 @@ abstract final class DuetComposer {
   static String _videoFilter(
     DuetLayout layout, {
     required bool flipUserClipHorizontally,
+    Offset pipNormalizedOffset = DuetLayoutGeometry.pipDefaultNormalizedOffset,
   }) {
     const halfW = _outW ~/ 2;
     const halfH = _outH ~/ 2;
-    final pipW = (_outW * DuetLayoutGeometry.pipWidthFraction).round();
-    final pipH = (_outH * DuetLayoutGeometry.pipHeightFraction).round();
-    final pipMargin = (_outW * DuetLayoutGeometry.pipMarginFraction).round();
-    final pipX = _outW - pipW - pipMargin;
-    final pipY = _outH - pipH - pipMargin;
+    final pipRect = DuetLayoutGeometry.pipRect(
+      DuetLayoutGeometry.outputSize,
+      normalizedTopLeft: pipNormalizedOffset,
+    );
+    final pipW = pipRect.width.round();
+    final pipH = pipRect.height.round();
+    final pipX = pipRect.left.round();
+    final pipY = pipRect.top.round();
 
     const padColor = 'black';
     final userFlip = flipUserClipHorizontally ? 'hflip,' : '';
 
-    String userTo(String w, String h, String label) =>
+    // Split layouts: letterbox so full frames stay visible.
+    String userLetterbox(String w, String h, String label) =>
         '[1:v]$userFlip'
         'scale=$w:$h:force_original_aspect_ratio=decrease,'
         'pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[$label]';
+
+    // PiP: fill + center-crop (no side/top black bars) — Instagram-style.
+    String cover(String input, String w, String h, String label) =>
+        '$input'
+        'scale=$w:$h:force_original_aspect_ratio=increase,'
+        'crop=$w:$h,setsar=1[$label]';
 
     switch (layout) {
       case DuetLayout.leftRight:
         return '[0:v]scale=$halfW:$_outH:force_original_aspect_ratio=decrease,'
             'pad=$halfW:$_outH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[left];'
-            '${userTo('$halfW', '$_outH', 'right')};'
+            '${userLetterbox('$halfW', '$_outH', 'right')};'
             '[left][right]hstack=inputs=2[vout]';
       case DuetLayout.topBottom:
         return '[0:v]scale=$_outW:$halfH:force_original_aspect_ratio=decrease,'
             'pad=$_outW:$halfH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[top];'
-            '${userTo('$_outW', '$halfH', 'bottom')};'
+            '${userLetterbox('$_outW', '$halfH', 'bottom')};'
             '[top][bottom]vstack=inputs=2[vout]';
       case DuetLayout.pip:
-        return '[0:v]scale=$_outW:$_outH:force_original_aspect_ratio=decrease,'
-            'pad=$_outW:$_outH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[base];'
-            '${userTo('$pipW', '$pipH', 'pip')};'
+        return '${cover('[0:v]', '$_outW', '$_outH', 'base')};'
+            '${cover('[1:v]$userFlip', '$pipW', '$pipH', 'pip')};'
             '[base][pip]overlay=$pipX:$pipY[vout]';
     }
   }

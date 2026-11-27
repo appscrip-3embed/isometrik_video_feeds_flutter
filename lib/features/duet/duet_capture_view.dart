@@ -53,6 +53,8 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
   String? _error;
   bool _usingFront = true;
   bool _composing = false;
+  /// PiP drag position (0–1); ignored for left-right / top-bottom.
+  late Offset _pipNormalizedOffset;
 
   int get _maxSeconds {
     final fromConfig = widget.config.maxDurationSeconds;
@@ -64,6 +66,9 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
   @override
   void initState() {
     super.initState();
+    _pipNormalizedOffset = DuetLayoutGeometry.clampPipNormalized(
+      widget.session.pipNormalizedOffset,
+    );
     WidgetsBinding.instance.addObserver(this);
     IsrVideoReelConfig.hostFeedTabVisibleNotifier
         .addListener(_onHostFeedTabVisibility);
@@ -257,6 +262,7 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
       // Front live preview is already mirrored by the platform; the recorded
       // file is not. Compose hflips so the media-editor page matches recording.
       userFrontCamera: source == DuetUserSource.camera && _usingFront,
+      pipNormalizedOffset: _pipNormalizedOffset,
     );
 
     final compose = widget.onComposeClip;
@@ -342,6 +348,11 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
                 layout: widget.session.layout,
                 originalPane: _buildOriginalPane(),
                 userPane: _buildUserPane(),
+                pipNormalizedOffset: _pipNormalizedOffset,
+                pipDraggable: !_recording && !_composing,
+                onPipNormalizedOffsetChanged: (offset) {
+                  setState(() => _pipNormalizedOffset = offset);
+                },
               ),
             if (_composing)
               Positioned.fill(
@@ -395,6 +406,10 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
     );
   }
 
+  /// PiP fills the pane (matches FFmpeg cover); split layouts letterbox.
+  BoxFit get _paneFit =>
+      widget.session.layout == DuetLayout.pip ? BoxFit.cover : BoxFit.contain;
+
   Widget _buildOriginalPane() {
     final player = _originalPlayer;
     if (player == null || !player.value.isInitialized) {
@@ -405,14 +420,13 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
         ),
       );
     }
-    return Center(
-      child: FittedBox(
-        fit: BoxFit.contain,
-        child: SizedBox(
-          width: player.value.size.width,
-          height: player.value.size.height,
-          child: VideoPlayer(player),
-        ),
+    return FittedBox(
+      fit: _paneFit,
+      clipBehavior: Clip.hardEdge,
+      child: SizedBox(
+        width: player.value.size.width,
+        height: player.value.size.height,
+        child: VideoPlayer(player),
       ),
     );
   }
@@ -429,14 +443,13 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
     }
     // No extra Transform mirror — platform already mirrors front preview.
     // Front recordings still set [DuetSession.userFrontCamera] so compose hflips.
-    return Center(
-      child: FittedBox(
-        fit: BoxFit.contain,
-        child: SizedBox(
-          width: camera.value.previewSize?.height ?? 720,
-          height: camera.value.previewSize?.width ?? 1280,
-          child: CameraPreview(camera),
-        ),
+    return FittedBox(
+      fit: _paneFit,
+      clipBehavior: Clip.hardEdge,
+      child: SizedBox(
+        width: camera.value.previewSize?.height ?? 720,
+        height: camera.value.previewSize?.width ?? 1280,
+        child: CameraPreview(camera),
       ),
     );
   }

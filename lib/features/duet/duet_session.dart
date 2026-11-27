@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:ism_video_reel_player/features/duet/duet_layout.dart';
 
 /// How the user half of a duet was obtained.
@@ -19,6 +20,7 @@ class DuetSession {
     this.userClipPath,
     this.userSource,
     this.userFrontCamera = false,
+    this.pipNormalizedOffset = DuetLayoutGeometry.pipDefaultNormalizedOffset,
     this.composedOutputPath,
   });
 
@@ -32,6 +34,11 @@ class DuetSession {
   /// Front-camera recording: live preview is platform-mirrored, but the file is
   /// not — set true so [DuetComposer] applies hflip and the editor matches.
   final bool userFrontCamera;
+
+  /// PiP only: 0–1 position within the padded frame (default bottom-right).
+  /// Drag on [DuetStage] updates this; [DuetComposer] uses the same offset.
+  final Offset pipNormalizedOffset;
+
   final String? composedOutputPath;
 
   DuetSession copyWith({
@@ -42,6 +49,7 @@ class DuetSession {
     String? userClipPath,
     DuetUserSource? userSource,
     bool? userFrontCamera,
+    Offset? pipNormalizedOffset,
     String? composedOutputPath,
   }) =>
       DuetSession(
@@ -53,6 +61,8 @@ class DuetSession {
         userClipPath: userClipPath ?? this.userClipPath,
         userSource: userSource ?? this.userSource,
         userFrontCamera: userFrontCamera ?? this.userFrontCamera,
+        pipNormalizedOffset:
+            pipNormalizedOffset ?? this.pipNormalizedOffset,
         composedOutputPath: composedOutputPath ?? this.composedOutputPath,
       );
 }

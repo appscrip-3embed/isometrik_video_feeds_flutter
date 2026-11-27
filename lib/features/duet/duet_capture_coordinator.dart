@@ -129,6 +129,7 @@ abstract final class DuetCaptureCoordinator {
               userPath: s.userClipPath!,
               layout: s.layout,
               flipUserClipHorizontally: s.userFrontCamera,
+              pipNormalizedOffset: s.pipNormalizedOffset,
             ),
           ),
         ),
@@ -155,6 +156,8 @@ abstract final class DuetCaptureCoordinator {
           'duet_source_post_id': captured.sourcePostId,
           'duet_layout': captured.layout.name,
           'duet_user_source': captured.userSource?.name,
+          'duet_pip_nx': captured.pipNormalizedOffset.dx,
+          'duet_pip_ny': captured.pipNormalizedOffset.dy,
         },
       );
 
