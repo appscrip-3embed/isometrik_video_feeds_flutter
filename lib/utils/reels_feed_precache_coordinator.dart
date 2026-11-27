@@ -13,16 +13,19 @@ import 'package:ism_video_reel_player/utils/utils.dart';
 /// **Media:** Thumbnails + light cache for [mediaPrecacheAheadCount] reels ahead;
 /// full decoders only for [effectiveAheadCount] (Android caps surfaces).
 ///
+/// **Decoder budget (reuse later):** Android keeps at most **one** warm decoder
+/// ahead of the visible reel (no behind warm). Combined with the visible player
+/// that matches [StandardVideoNonPreloadedManager] soft-cap (~2 live). Warming
+/// behind + ahead used to pin 2 extra decoders while the current one played,
+/// which starved MediaCodec and looked like "minutes to load" 15–60s clips.
+///
 /// Reuse from [PostItemWidget] on page change, mid-swipe scroll, and after
 /// pagination — not from profile-only players.
 class ReelsFeedPrecacheCoordinator {
   ReelsFeedPrecacheCoordinator._();
 
-  /// Native decoders to keep ready just below the current reel.
+  /// Native decoders to keep ready just below the current reel (iOS/desktop).
   static const int aheadCount = 2;
-
-  /// One reel above for quick scroll-back.
-  static const int behindCount = 1;
 
   /// Thumbnails + HLS first-segment / light warm for this many reels ahead.
   static const int mediaPrecacheAheadCount = 10;
@@ -30,8 +33,11 @@ class ReelsFeedPrecacheCoordinator {
   /// Begin loading the next feed page when this many reels remain (was 5).
   static const int loadMoreRemainingReels = 10;
 
-  /// Android SurfaceView limit — only one reel ahead outside the current page.
+  /// Android SurfaceView / MediaCodec budget — only one reel ahead.
   static int get effectiveAheadCount => Platform.isAndroid ? 1 : aheadCount;
+
+  /// Scroll-back warm decoder. Off on Android so live count stays ≤ soft-cap.
+  static int get behindCount => Platform.isAndroid ? 0 : 1;
 
   static bool _isVideoMedia(MediaMetaData media) =>
       media.mediaType == MediaType.video.value &&
@@ -66,7 +72,8 @@ class ReelsFeedPrecacheCoordinator {
     if (reelIndex == currentIndex) return false;
     final diff = reelIndex - currentIndex;
     if (diff >= 1 && diff <= effectiveAheadCount) return true;
-    if (diff == -behindCount) return true;
+    // behindCount == 0 on Android — do not treat current (diff 0) as warm-behind.
+    if (behindCount > 0 && diff == -behindCount) return true;
     return false;
   }
 
@@ -94,7 +101,10 @@ class ReelsFeedPrecacheCoordinator {
       thumbUrls.addAll(_thumbnailUrls(reel));
       final video = primaryVideoUrl(reel);
       if (video == null) continue;
-      final needsDecoder = offset == -behindCount ||
+      // Current reel (offset 0) is owned by the visible VideoPlayerWidget —
+      // only pin ahead / optional behind so soft-cap stays at ~2 on Android.
+      final needsDecoder =
+          (behindCount > 0 && offset == -behindCount) ||
           (offset >= 1 && offset <= effectiveAheadCount);
       if (needsDecoder) {
         decoderVideoUrls.add(video);

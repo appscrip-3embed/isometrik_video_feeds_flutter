@@ -14,6 +14,13 @@ import 'package:path_provider/path_provider.dart';
 /// [MediaUtil.mergeVideoSegments] only concatenates — it cannot hstack /
 /// vstack / overlay. Keep this class inside `features/duet` so composition
 /// stays reusable without touching create-post.
+///
+/// **Encode policy (reuse later):** prefer platform H.264 from the min kit
+/// (`h264_mediacodec` / `h264_videotoolbox`). Do **not** use `-c:v mpeg4` as
+/// the primary path — MPEG-4 Part 2 (`video/mp4v-es`) stalls MediaTek/ExoPlayer
+/// reels decoders. Keep mpeg4 only as a last-resort fallback when HW H.264
+/// fails. `libx264` needs a `-gpl` FFmpeg package; stay on min unless product
+/// upgrades the dependency.
 abstract final class DuetComposer {
   DuetComposer._();
 
@@ -46,28 +53,25 @@ abstract final class DuetComposer {
 
     onProgress?.call(0.05);
 
-    // Original reel audio only (camera/gallery track is not mapped). Silent fallback
-    // if the source clip has no audio stream.
-    final attempts = <String>[
-      _buildCommand(
-        original.path,
-        user.path,
-        outPath,
-        layout,
-        flipUserClipHorizontally: flipUserClipHorizontally,
-        pipNormalizedOffset: pipNormalizedOffset,
-        audioMode: _AudioMode.originalOnly,
-      ),
-      _buildCommand(
-        original.path,
-        user.path,
-        outPath,
-        layout,
-        flipUserClipHorizontally: flipUserClipHorizontally,
-        pipNormalizedOffset: pipNormalizedOffset,
-        audioMode: _AudioMode.silent,
-      ),
-    ];
+    // Prefer H.264 (playable in reels), then mpeg4 only if HW encode fails.
+    // For each encode profile: original audio, then silent if no audio stream.
+    final attempts = <String>[];
+    for (final encode in _videoEncodeProfiles()) {
+      for (final audioMode in _AudioMode.values) {
+        attempts.add(
+          _buildCommand(
+            original.path,
+            user.path,
+            outPath,
+            layout,
+            flipUserClipHorizontally: flipUserClipHorizontally,
+            pipNormalizedOffset: pipNormalizedOffset,
+            audioMode: audioMode,
+            videoEncode: encode,
+          ),
+        );
+      }
+    }
 
     for (final cmd in attempts) {
       AppLog.info('DuetComposer: $cmd');
@@ -97,6 +101,28 @@ abstract final class DuetComposer {
     return null;
   }
 
+  /// Ordered encode arg strings for the min FFmpeg kit (no libx264).
+  ///
+  /// Reuse: any offline compose that must stay on `ffmpeg_kit_flutter_new_min`
+  /// should call this (or copy the same order) instead of hard-coding mpeg4.
+  static List<String> _videoEncodeProfiles() {
+    final profiles = <String>[];
+    if (Platform.isAndroid) {
+      // MediaCodec H.264 — available via Android system libs in the min package.
+      profiles.add(
+        '-r 30 -c:v h264_mediacodec -b:v 2500k -pix_fmt yuv420p -fps_mode cfr',
+      );
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      // VideoToolbox H.264 — enabled for min on Apple platforms.
+      profiles.add(
+        '-r 30 -c:v h264_videotoolbox -b:v 2500k -pix_fmt yuv420p -fps_mode cfr',
+      );
+    }
+    // Last resort only: MPEG-4 Part 2 plays poorly in multi-decoder reels feeds.
+    profiles.add('-r 30 -c:v mpeg4 -q:v 5 -fps_mode cfr');
+    return profiles;
+  }
+
   static String _buildCommand(
     String originalPath,
     String userPath,
@@ -105,6 +131,7 @@ abstract final class DuetComposer {
     required bool flipUserClipHorizontally,
     required Offset pipNormalizedOffset,
     required _AudioMode audioMode,
+    required String videoEncode,
   }) {
     // Layout graph ends at [vout]; normalize to CFR before encode.
     final layoutGraph = _videoFilter(
@@ -113,13 +140,9 @@ abstract final class DuetComposer {
       pipNormalizedOffset: pipNormalizedOffset,
     );
     // Gallery / camera clips often carry microsecond timebases (e.g. 1/1000000
-    // or 15360 tbn). mpeg4 rejects denominators > 65535, which is why some
-    // gallery picks failed with "Could not create the duet video" while others
-    // worked. Force CFR 30 so the encoder gets a valid timebase.
-    // Reuse: keep fps=30 + -r 30 whenever DuetComposer stays on mpeg4 (min kit).
+    // or 15360 tbn). Force CFR 30 so HW and mpeg4 encoders get a valid timebase.
     final videoGraph = '$layoutGraph;[vout]fps=30,settb=1/30[vout_cfr]';
     // fps_mode (not legacy -vsync) — this FFmpeg kit is n8.x.
-    const videoEncode = '-r 30 -c:v mpeg4 -q:v 5 -fps_mode cfr';
     switch (audioMode) {
       case _AudioMode.originalOnly:
         return '-y -i "$originalPath" -i "$userPath" '

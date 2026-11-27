@@ -189,14 +189,17 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   static const Duration _sizeWaitTimeout = Duration(milliseconds: 800);
 
-  /// Live decoders — keep low on Android (SurfaceView buffer limits / BLASTBufferQueue).
+  /// Live decoders — keep low on Android (SurfaceView / MediaCodec contention).
+  /// Reuse: must stay aligned with [ReelsFeedPrecacheCoordinator] warm window
+  /// (Android: visible + 1 ahead ≈ 2). Raising this without shrinking the warm
+  /// window brings back stalled 15–60s playback on MediaTek devices.
   static int get _maxLiveControllers => Platform.isAndroid ? 2 : 4;
 
   /// Insertion-ordered live controller map (url → wrapper).
   final LinkedHashMap<String, IVideoPlayerController> _liveControllers =
       LinkedHashMap<String, IVideoPlayerController>();
 
-  /// URLs in the reels warm window — evicted only after leaving the window.
+  /// URLs in the reels warm window — preferred keep, but soft-cap still wins.
   final Set<String> _warmPinnedUrls = <String>{};
 
   final Set<String> _initializingUrls = <String>{};
@@ -219,6 +222,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     _warmPinnedUrls
       ..clear()
       ..addAll(urls);
+    // Pins must not defeat the soft-cap (warm ahead + visible used to exceed 2).
+    _evictIfOverCap();
   }
 
   /// Clears warm pins and disposes pooled decoders (profile / other tabs).
@@ -250,19 +255,20 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   void _evictIfOverCap({String? exceptUrl}) {
     while (_liveControllers.length > _maxLiveControllers) {
-      String? evictUrl;
-      for (final entry in _liveControllers.entries) {
-        if (entry.key == exceptUrl) continue;
-        if (_warmPinnedUrls.contains(entry.key)) continue;
-        if (FeedVideoPlayerHandoff.isControllerProtected(entry.value)) {
-          continue;
-        }
-        evictUrl = entry.key;
-        break;
-      }
+      // Pass 1: drop non-warm first. Pass 2: drop warm pins too so soft-cap
+      // always wins (avoids 3+ MediaCodec sessions during fast scroll).
+      final evictUrl = _pickEvictionUrl(
+            exceptUrl: exceptUrl,
+            allowWarmPinned: false,
+          ) ??
+          _pickEvictionUrl(
+            exceptUrl: exceptUrl,
+            allowWarmPinned: true,
+          );
       if (evictUrl == null) break;
       final victim = _liveControllers.remove(evictUrl);
       if (victim == null) continue;
+      _warmPinnedUrls.remove(evictUrl);
       try {
         if (victim is StandardVideoNonPreloadedController) {
           victim.prepareForDispose();
@@ -275,6 +281,25 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
         debugPrint('⚠️ Soft-cap eviction error for $evictUrl: $e');
       }
     }
+  }
+
+  /// Oldest (insertion-order) live URL that is safe to dispose.
+  String? _pickEvictionUrl({
+    required String? exceptUrl,
+    required bool allowWarmPinned,
+  }) {
+    for (final entry in _liveControllers.entries) {
+      if (entry.key == exceptUrl) continue;
+      if (!allowWarmPinned && _warmPinnedUrls.contains(entry.key)) continue;
+      if (FeedVideoPlayerHandoff.isControllerProtected(entry.value)) continue;
+      if (entry.value is StandardVideoNonPreloadedController) {
+        final c = entry.value as StandardVideoNonPreloadedController;
+        // Still attached to a mounted widget — do not tear down mid-frame.
+        if (c.attachCount > 0) continue;
+      }
+      return entry.key;
+    }
+    return null;
   }
 
   @override

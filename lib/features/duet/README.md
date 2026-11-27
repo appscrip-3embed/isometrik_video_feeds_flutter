@@ -24,7 +24,7 @@ When enabled, more-options on an existing **video** reel shows **Duet** if `sett
 1. More options → Duet  
 2. Layout picker: left-right / top-bottom / PiP  
 3. `DuetCaptureView` — original + camera (gallery optional)  
-4. `DuetComposer` (FFmpeg; split = letterbox, PiP = cover/crop; **original audio only**) → single MP4  
+4. `DuetComposer` (FFmpeg; split = letterbox, PiP = cover/crop; **original audio only**) → single **H.264** MP4 (HW encode via MediaCodec / VideoToolbox; mpeg4 only if HW fails)  
 5. Existing media editor → post attributes  
 
 ## Camera
@@ -49,3 +49,5 @@ clips are not flipped. Mic off — original reel audio only.
 ## Dependency
 
 `ffmpeg_kit_flutter_new_min` (pinned `3.6.8`) — used only by `DuetComposer` for hstack / vstack / overlay. Segment merge in `MediaUtil` cannot do layouts.
+
+**Encode note:** min kit has no `libx264`. Prefer `h264_mediacodec` (Android) / `h264_videotoolbox` (iOS). Avoid primary `-c:v mpeg4` — MPEG-4 Part 2 stalls reels playback on MediaTek. Upgrade to `*_min_gpl` only if product needs software x264 everywhere.
