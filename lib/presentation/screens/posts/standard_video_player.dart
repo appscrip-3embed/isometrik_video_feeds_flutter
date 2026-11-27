@@ -234,18 +234,10 @@ class StandardVideoCacheManager implements IVideoCacheManager {
       url = url.replaceFirst('http:', 'https:');
     }
 
-    // For HLS streams, add specific headers and format hint
+    // For HLS streams, add specific headers and format hint.
+    // iOS progressive MP4 must not send Accept-Encoding — see VideoMediaUtil.
     final isHls = url.toLowerCase().endsWith('.m3u8');
-    final headers = {
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'no-cache',
-      if (isHls)
-        'X-Playback-Session-Id':
-            DateTime.now().millisecondsSinceEpoch.toString(),
-    };
+    final headers = VideoMediaUtil.networkHttpHeaders(isHls: isHls);
 
     return VideoPlayerController.networkUrl(
       Uri.parse(url),

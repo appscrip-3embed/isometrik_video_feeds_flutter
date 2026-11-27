@@ -189,11 +189,12 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   static const Duration _sizeWaitTimeout = Duration(milliseconds: 800);
 
-  /// Live decoders — keep low on Android (SurfaceView / MediaCodec contention).
+  /// Live decoders — keep low on mobile (SurfaceView / MediaCodec / AVPlayer).
   /// Reuse: must stay aligned with [ReelsFeedPrecacheCoordinator] warm window
-  /// (Android: visible + 1 ahead ≈ 2). Raising this without shrinking the warm
-  /// window brings back stalled 15–60s playback on MediaTek devices.
-  static int get _maxLiveControllers => Platform.isAndroid ? 2 : 4;
+  /// (mobile: visible + 1 ahead ≈ 2). Android already smooth; iOS was slow with
+  /// 4 concurrent AVPlayers + custom HTTP headers on progressive MP4.
+  static int get _maxLiveControllers =>
+      (Platform.isAndroid || Platform.isIOS) ? 2 : 4;
 
   /// Insertion-ordered live controller map (url → wrapper).
   final LinkedHashMap<String, IVideoPlayerController> _liveControllers =
@@ -321,7 +322,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
       toWarm.add(url);
     }
 
-    final parallel = Platform.isAndroid ? 1 : 2;
+    // One-at-a-time warm on mobile — parallel AVPlayer inits stall iOS hard.
+    final parallel = (Platform.isAndroid || Platform.isIOS) ? 1 : 2;
     for (var i = 0; i < toWarm.length; i += parallel) {
       final batch = toWarm.skip(i).take(parallel);
       await Future.wait(
@@ -494,16 +496,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     }
 
     final isHls = url.toLowerCase().endsWith('.m3u8');
-    final headers = {
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'no-cache',
-      if (isHls)
-        'X-Playback-Session-Id':
-            DateTime.now().millisecondsSinceEpoch.toString(),
-    };
+    // iOS: empty headers for progressive MP4 — see [VideoMediaUtil.networkHttpHeaders].
+    final headers = VideoMediaUtil.networkHttpHeaders(isHls: isHls);
 
     return VideoPlayerController.networkUrl(
       Uri.parse(url),

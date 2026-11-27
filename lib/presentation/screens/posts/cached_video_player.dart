@@ -257,32 +257,10 @@ class CachedVideoCacheManager implements IVideoCacheManager {
       url = url.replaceFirst('http:', 'https:');
     }
 
-    // For HLS streams, add specific headers and format hint
+    // Shared iOS-safe headers (no Accept-Encoding on progressive MP4).
+    // Reuse: [VideoMediaUtil.networkHttpHeaders] — do not reintroduce br/gzip here.
     final isHls = url.toLowerCase().endsWith('.m3u8');
-    // final headers = {
-    //   'User-Agent':
-    //       'AppleCoreMedia/1.0.0.19G82 (iPhone; U; CPU OS 15_6_1 like Mac OS X; en_us)',
-    //   'Accept': '*/*',
-    //   'Accept-Language': 'en-US,en;q=0.9',
-    //   'Accept-Encoding': 'gzip, deflate, br',
-    //   if (isHls)
-    //     'X-Playback-Session-Id':
-    //         DateTime.now().millisecondsSinceEpoch.toString(),
-    // };
-
-    final headers = {
-      // Neutral, cross-platform user agent
-      'User-Agent': 'FlutterVideoPlayer',
-
-      // Allow all HLS-related MIME types
-      'Accept': '*/*',
-
-      // Keep it simple – avoid segment compression issues
-      // DO NOT send Accept-Encoding
-
-      // Optional but safe
-      'Connection': 'keep-alive',
-    };
+    final headers = VideoMediaUtil.networkHttpHeaders(isHls: isHls);
 
     return CachedVideoPlayerPlus.networkUrl(
       Uri.parse(url),
