@@ -6,23 +6,34 @@ import 'package:ism_video_reel_player/res/res.dart';
 /// Bottom sheet to pick left-right / top-bottom / PiP before duet capture.
 ///
 /// Returns the chosen [DuetLayout], or null if dismissed.
+///
+/// [onLayoutChosen] fires synchronously on tap *before* the sheet pops so the
+/// host can insert a preparing overlay without racing the dismiss animation.
 class DuetLayoutPickerSheet extends StatelessWidget {
   const DuetLayoutPickerSheet({
     super.key,
     this.initialLayout = DuetLayout.leftRight,
+    this.onLayoutChosen,
   });
 
   final DuetLayout initialLayout;
 
+  /// Called when the user taps a layout, before [Navigator.pop].
+  final VoidCallback? onLayoutChosen;
+
   static Future<DuetLayout?> show(
     BuildContext context, {
     DuetLayout initialLayout = DuetLayout.leftRight,
+    VoidCallback? onLayoutChosen,
   }) {
     return showModalBottomSheet<DuetLayout>(
       context: context,
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => DuetLayoutPickerSheet(initialLayout: initialLayout),
+      builder: (_) => DuetLayoutPickerSheet(
+        initialLayout: initialLayout,
+        onLayoutChosen: onLayoutChosen,
+      ),
     );
   }
 
@@ -83,7 +94,12 @@ class DuetLayoutPickerSheet extends StatelessWidget {
                         layout: layout,
                         selected: layout == initialLayout,
                         textColor: _textColor,
-                        onTap: () => Navigator.pop(context, layout),
+                        onTap: () {
+                          // Host inserts "Preparing for duet" here — before
+                          // pop — so the feed never becomes interactive.
+                          onLayoutChosen?.call();
+                          Navigator.pop(context, layout);
+                        },
                       ),
                     ),
                   ],

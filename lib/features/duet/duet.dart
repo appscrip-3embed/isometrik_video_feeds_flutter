@@ -5,6 +5,9 @@
 ///
 /// Reuse notes for moderators:
 /// - [DuetCaptureCoordinator.handleFromPost] is the public entry (mirrors dub-with-audio).
+/// - After layout pick, prep uses a root [OverlayEntry] "Preparing for duet"
+///   blocker (not a dialog — dialogs race the sheet dismiss and stay hidden).
+///   Inserted on layout tap before the sheet pops.
 /// - Layouts live in [DuetLayout] / [DuetLayoutGeometry].
 /// - Export is [DuetComposer] (FFmpeg hstack / vstack / overlay).
 /// - Live stage UI is [DuetStage] + [DuetCaptureView].

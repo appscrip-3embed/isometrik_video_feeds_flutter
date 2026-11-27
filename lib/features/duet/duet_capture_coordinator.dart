@@ -26,6 +26,11 @@ import 'package:uuid/uuid.dart';
 /// compose → media editor → post attributes.
 ///
 /// Standalone: enable via [PostConfig.enableDuet]. Do not call from create-post.
+///
+/// Prep UX: a root [OverlayEntry] is inserted the moment a layout is tapped
+/// (before the sheet finishes closing). Navigator dialogs race the sheet
+/// dismiss animation and were invisible for 10–15s during download — do not
+/// go back to showDialog/DialogRoute for this gate.
 abstract final class DuetCaptureCoordinator {
   DuetCaptureCoordinator._();
 
@@ -70,11 +75,35 @@ abstract final class DuetCaptureCoordinator {
       return;
     }
 
+    // Insert "Preparing for duet" on layout tap — before the sheet pops — so
+    // the feed is never interactive during dismiss + download.
+    final prepOverlay = DuetPrepOverlayHandle();
     final layout = await DuetLayoutPickerSheet.show(
       context,
       initialLayout: resolved.defaultLayout,
+      onLayoutChosen: () {
+        if (!context.mounted) return;
+        prepOverlay.show(
+          context,
+          title: IsrTranslationFile.duetPreparingTitle,
+          subtitle: IsrTranslationFile.duetPreparingSubtitle,
+        );
+      },
     );
-    if (layout == null || !context.mounted) return;
+    if (layout == null || !context.mounted) {
+      prepOverlay.hide();
+      return;
+    }
+
+    // Sheet may have returned before onLayoutChosen ran in edge cases —
+    // ensure the blocker is up before any async prep work.
+    if (!prepOverlay.isShowing) {
+      prepOverlay.show(
+        context,
+        title: IsrTranslationFile.duetPreparingTitle,
+        subtitle: IsrTranslationFile.duetPreparingSubtitle,
+      );
+    }
 
     await start(
       context,
@@ -82,6 +111,7 @@ abstract final class DuetCaptureCoordinator {
       layout: layout,
       videoUrl: videoUrl,
       config: resolved,
+      prepOverlay: prepOverlay,
     );
   }
 
@@ -91,15 +121,29 @@ abstract final class DuetCaptureCoordinator {
     required DuetLayout layout,
     required String videoUrl,
     DuetConfig config = const DuetConfig(),
+    DuetPrepOverlayHandle? prepOverlay,
   }) async {
-    if (!await IsrAppNavigator.ensureCanCreateContent()) return;
     if (!context.mounted) return;
 
-    await IsrVideoReelConfig.releaseFeedDecodersForHeavyOverlay();
-    if (!context.mounted) return;
+    final overlay = prepOverlay ?? DuetPrepOverlayHandle();
+    if (!overlay.isShowing) {
+      overlay.show(
+        context,
+        title: IsrTranslationFile.duetPreparingTitle,
+        subtitle: IsrTranslationFile.duetPreparingSubtitle,
+      );
+    }
 
     try {
-      final localOriginal = await _downloadOriginalWithLoader(context, videoUrl);
+      // Already gated in [handleFromPost]; re-check in case start() is called
+      // directly from another entry.
+      if (!await IsrAppNavigator.ensureCanCreateContent()) return;
+      if (!context.mounted) return;
+
+      await IsrVideoReelConfig.releaseFeedDecodersForHeavyOverlay();
+      if (!context.mounted) return;
+
+      final localOriginal = await _resolveLocalVideo(videoUrl);
       if (!context.mounted) return;
       if (localOriginal == null) {
         Utility.showToastMessage(IsrTranslationFile.duetDownloadFailedMessage);
@@ -118,8 +162,9 @@ abstract final class DuetCaptureCoordinator {
         originalDurationSeconds: durationSeconds,
       );
 
-      final captured = await Navigator.of(context, rootNavigator: true)
-          .push<DuetSession>(
+      // Keep overlay up until capture is on-screen, then remove it.
+      final rootNav = Navigator.of(context, rootNavigator: true);
+      final capturedFuture = rootNav.push<DuetSession>(
         MaterialPageRoute(
           builder: (_) => DuetCaptureView(
             session: session,
@@ -134,6 +179,10 @@ abstract final class DuetCaptureCoordinator {
           ),
         ),
       );
+      // Let capture paint one frame under the overlay, then drop the blocker.
+      WidgetsBinding.instance.addPostFrameCallback((_) => overlay.hide());
+
+      final captured = await capturedFuture;
       if (!context.mounted) return;
       if (captured == null) return;
 
@@ -182,45 +231,8 @@ abstract final class DuetCaptureCoordinator {
       AppLog.error('DuetCaptureCoordinator editor handoff: $e\n$st');
       Utility.showToastMessage(IsrTranslationFile.duetComposeFailedMessage);
     } finally {
+      overlay.hide();
       IsrVideoReelConfig.releasePlaybackSuppression();
-    }
-  }
-
-  static Future<String?> _downloadOriginalWithLoader(
-    BuildContext context,
-    String videoUrl,
-  ) async {
-    _showBlockingOverlay(
-      context,
-      title: IsrTranslationFile.duetPreparingTitle,
-      subtitle: IsrTranslationFile.duetPreparingSubtitle,
-    );
-    try {
-      return await _resolveLocalVideo(videoUrl);
-    } finally {
-      _hideBlockingOverlay(context);
-    }
-  }
-
-  static Future<String?> _composeWithLoader(
-    BuildContext context, {
-    required String originalPath,
-    required String userPath,
-    required DuetLayout layout,
-  }) async {
-    _showBlockingOverlay(
-      context,
-      title: IsrTranslationFile.duetComposingTitle,
-      subtitle: IsrTranslationFile.duetComposingSubtitle,
-    );
-    try {
-      return await DuetComposer.compose(
-        originalPath: originalPath,
-        userPath: userPath,
-        layout: layout,
-      );
-    } finally {
-      _hideBlockingOverlay(context);
     }
   }
 
@@ -272,32 +284,67 @@ abstract final class DuetCaptureCoordinator {
       return null;
     }
   }
+}
 
-  static void _showBlockingOverlay(
+/// Root-overlay blocker for duet prep (decoder release + original download).
+///
+/// Uses [OverlayEntry] instead of [showDialog] so it appears even while the
+/// layout sheet is still dismissing (navigator route pushes race that
+/// animation and were invisible).
+///
+/// Reuse: call [show] as early as the user commits to a layout, keep up
+/// through async prep, [hide] only when the next full-screen route is ready.
+final class DuetPrepOverlayHandle {
+  OverlayEntry? _entry;
+
+  bool get isShowing => _entry != null;
+
+  /// Synchronously inserts a full-screen absorbing blocker on the root overlay.
+  void show(
     BuildContext context, {
     required String title,
     required String subtitle,
   }) {
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        useRootNavigator: true,
-        builder: (_) => PopScope(
-          canPop: false,
-          child: IsrProcessingOverlay(
-            title: title,
-            subtitle: subtitle,
-            primaryColor: IsrColors.appColor,
-          ),
+    if (!context.mounted) return;
+    hide();
+
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) {
+      AppLog.error(
+        'DuetPrepOverlayHandle: no root Overlay — preparing UI skipped',
+      );
+      return;
+    }
+
+    // Same branded visual as compose ("Creating duet / Combining both videos")
+    // — host GIF/Lottie via [IsrProcessingOverlay] / processingOverlayLottiePath.
+    _entry = OverlayEntry(
+      builder: (ctx) => Material(
+        type: MaterialType.transparency,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const ModalBarrier(dismissible: false, color: Colors.transparent),
+            IsrProcessingOverlay(
+              title: title,
+              subtitle: subtitle,
+              primaryColor: IsrColors.appColor,
+            ),
+          ],
         ),
       ),
     );
+    overlay.insert(_entry!);
   }
 
-  static void _hideBlockingOverlay(BuildContext context) {
-    if (!context.mounted) return;
-    final nav = Navigator.of(context, rootNavigator: true);
-    if (nav.canPop()) nav.pop();
+  void hide() {
+    final entry = _entry;
+    _entry = null;
+    if (entry == null) return;
+    try {
+      entry.remove();
+    } catch (e, st) {
+      AppLog.error('DuetPrepOverlayHandle.hide: $e\n$st');
+    }
   }
 }
