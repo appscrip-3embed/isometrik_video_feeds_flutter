@@ -18,6 +18,7 @@ class DuetSession {
     required this.originalDurationSeconds,
     this.userClipPath,
     this.userSource,
+    this.userFrontCamera = false,
     this.composedOutputPath,
   });
 
@@ -27,6 +28,10 @@ class DuetSession {
   final int originalDurationSeconds;
   final String? userClipPath;
   final DuetUserSource? userSource;
+
+  /// Front-camera recording: live preview is platform-mirrored, but the file is
+  /// not — set true so [DuetComposer] applies hflip and the editor matches.
+  final bool userFrontCamera;
   final String? composedOutputPath;
 
   DuetSession copyWith({
@@ -36,6 +41,7 @@ class DuetSession {
     int? originalDurationSeconds,
     String? userClipPath,
     DuetUserSource? userSource,
+    bool? userFrontCamera,
     String? composedOutputPath,
   }) =>
       DuetSession(
@@ -46,6 +52,7 @@ class DuetSession {
             originalDurationSeconds ?? this.originalDurationSeconds,
         userClipPath: userClipPath ?? this.userClipPath,
         userSource: userSource ?? this.userSource,
+        userFrontCamera: userFrontCamera ?? this.userFrontCamera,
         composedOutputPath: composedOutputPath ?? this.composedOutputPath,
       );
 }

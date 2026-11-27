@@ -95,64 +95,69 @@ abstract final class DuetCaptureCoordinator {
     if (!await IsrAppNavigator.ensureCanCreateContent()) return;
     if (!context.mounted) return;
 
-    final localOriginal = await _downloadOriginalWithLoader(context, videoUrl);
+    await IsrVideoReelConfig.releaseFeedDecodersForHeavyOverlay();
     if (!context.mounted) return;
-    if (localOriginal == null) {
-      Utility.showToastMessage(IsrTranslationFile.duetDownloadFailedMessage);
-      return;
-    }
-
-    final durationSeconds = ReelDubAudioUtil.reelVideoDurationSecondsForDub(
-      post,
-      fallback: config.maxDurationSeconds,
-    );
-
-    final session = DuetSession(
-      sourcePostId: post.id ?? '',
-      originalVideoPath: localOriginal,
-      layout: layout,
-      originalDurationSeconds: durationSeconds,
-    );
-
-    final captured = await Navigator.of(context, rootNavigator: true)
-        .push<DuetSession>(
-      MaterialPageRoute(
-        builder: (_) => DuetCaptureView(
-          session: session,
-          config: config,
-          onComposeClip: (s) => DuetComposer.compose(
-            originalPath: s.originalVideoPath,
-            userPath: s.userClipPath!,
-            layout: s.layout,
-          ),
-        ),
-      ),
-    );
-    if (!context.mounted) return;
-    if (captured == null) return;
-
-    final composed = captured.composedOutputPath?.trim();
-    if (composed == null || composed.isEmpty) {
-      if (captured.userClipPath != null && captured.userClipPath!.isNotEmpty) {
-        Utility.showToastMessage(IsrTranslationFile.duetComposeFailedMessage);
-      }
-      return;
-    }
-
-    final editItem = me.MediaEditItem(
-      originalPath: composed,
-      mediaType: me.EditMediaType.video,
-      width: DuetLayoutGeometry.outputSize.width,
-      height: DuetLayoutGeometry.outputSize.height,
-      duration: durationSeconds,
-      metaData: {
-        'duet_source_post_id': captured.sourcePostId,
-        'duet_layout': captured.layout.name,
-        'duet_user_source': captured.userSource?.name,
-      },
-    );
 
     try {
+      final localOriginal = await _downloadOriginalWithLoader(context, videoUrl);
+      if (!context.mounted) return;
+      if (localOriginal == null) {
+        Utility.showToastMessage(IsrTranslationFile.duetDownloadFailedMessage);
+        return;
+      }
+
+      final durationSeconds = ReelDubAudioUtil.reelVideoDurationSecondsForDub(
+        post,
+        fallback: config.maxDurationSeconds,
+      );
+
+      final session = DuetSession(
+        sourcePostId: post.id ?? '',
+        originalVideoPath: localOriginal,
+        layout: layout,
+        originalDurationSeconds: durationSeconds,
+      );
+
+      final captured = await Navigator.of(context, rootNavigator: true)
+          .push<DuetSession>(
+        MaterialPageRoute(
+          builder: (_) => DuetCaptureView(
+            session: session,
+            config: config,
+            onComposeClip: (s) => DuetComposer.compose(
+              originalPath: s.originalVideoPath,
+              userPath: s.userClipPath!,
+              layout: s.layout,
+              flipUserClipHorizontally: s.userFrontCamera,
+            ),
+          ),
+        ),
+      );
+      if (!context.mounted) return;
+      if (captured == null) return;
+
+      final composed = captured.composedOutputPath?.trim();
+      if (composed == null || composed.isEmpty) {
+        if (captured.userClipPath != null &&
+            captured.userClipPath!.isNotEmpty) {
+          Utility.showToastMessage(IsrTranslationFile.duetComposeFailedMessage);
+        }
+        return;
+      }
+
+      final editItem = me.MediaEditItem(
+        originalPath: composed,
+        mediaType: me.EditMediaType.video,
+        width: DuetLayoutGeometry.outputSize.width,
+        height: DuetLayoutGeometry.outputSize.height,
+        duration: durationSeconds,
+        metaData: {
+          'duet_source_post_id': captured.sourcePostId,
+          'duet_layout': captured.layout.name,
+          'duet_user_source': captured.userSource?.name,
+        },
+      );
+
       final edited = await IsrAppNavigator.presentCreatePostMediaEditor(
         context,
         mediaItems: [editItem],
@@ -173,6 +178,8 @@ abstract final class DuetCaptureCoordinator {
     } catch (e, st) {
       AppLog.error('DuetCaptureCoordinator editor handoff: $e\n$st');
       Utility.showToastMessage(IsrTranslationFile.duetComposeFailedMessage);
+    } finally {
+      IsrVideoReelConfig.releasePlaybackSuppression();
     }
   }
 

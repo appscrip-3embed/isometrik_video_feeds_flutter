@@ -3,11 +3,13 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:ism_video_reel_player/features/duet/duet_config.dart';
 import 'package:ism_video_reel_player/features/duet/duet_layout.dart';
 import 'package:ism_video_reel_player/features/duet/duet_session.dart';
 import 'package:ism_video_reel_player/features/duet/widgets/duet_stage.dart';
+import 'package:ism_video_reel_player/isr_video_reel_config.dart';
 import 'package:ism_video_reel_player/presentation/screens/widgets/isr_processing_overlay.dart';
 import 'package:ism_video_reel_player/res/res.dart';
 import 'package:ism_video_reel_player/utils/app_log.dart';
@@ -63,7 +65,15 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .addListener(_onHostFeedTabVisibility);
     unawaited(_bootstrap());
+  }
+
+  void _onHostFeedTabVisibility() {
+    if (IsrVideoReelConfig.hostFeedTabVisibleNotifier.value) return;
+    unawaited(_originalPlayer?.pause());
+    unawaited(_galleryPreview?.pause());
   }
 
   Future<void> _bootstrap() async {
@@ -118,6 +128,11 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
     await controller.initialize();
+    try {
+      await controller.lockCaptureOrientation(DeviceOrientation.portraitUp);
+    } catch (e) {
+      AppLog.error('DuetCaptureView lockCaptureOrientation: $e');
+    }
     await previous?.dispose();
     _camera = controller;
     if (mounted) setState(() {});
@@ -239,6 +254,9 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
     final baseSession = widget.session.copyWith(
       userClipPath: clipPath,
       userSource: source,
+      // Front live preview is already mirrored by the platform; the recorded
+      // file is not. Compose hflips so the media-editor page matches recording.
+      userFrontCamera: source == DuetUserSource.camera && _usingFront,
     );
 
     final compose = widget.onComposeClip;
@@ -271,6 +289,11 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_originalPlayer?.pause());
+      unawaited(_galleryPreview?.pause());
+    }
     final camera = _camera;
     if (camera == null || !camera.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
@@ -284,6 +307,8 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .removeListener(_onHostFeedTabVisibility);
     _timer?.cancel();
     unawaited(_camera?.dispose() ?? Future.value());
     unawaited(_originalPlayer?.dispose() ?? Future.value());
@@ -402,7 +427,8 @@ class _DuetCaptureViewState extends State<DuetCaptureView>
         ),
       );
     }
-    // Letterbox in-pane (matches FFmpeg export — full frame, black bars).
+    // No extra Transform mirror — platform already mirrors front preview.
+    // Front recordings still set [DuetSession.userFrontCamera] so compose hflips.
     return Center(
       child: FittedBox(
         fit: BoxFit.contain,

@@ -24,6 +24,8 @@ abstract final class DuetComposer {
     required String originalPath,
     required String userPath,
     required DuetLayout layout,
+    /// Horizontal flip on the user clip (front-camera duet recordings).
+    bool flipUserClipHorizontally = false,
     void Function(double progress)? onProgress,
   }) async {
     final original = File(originalPath);
@@ -49,6 +51,7 @@ abstract final class DuetComposer {
         user.path,
         outPath,
         layout,
+        flipUserClipHorizontally: flipUserClipHorizontally,
         audioMode: _AudioMode.originalOnly,
       ),
       _buildCommand(
@@ -56,6 +59,7 @@ abstract final class DuetComposer {
         user.path,
         outPath,
         layout,
+        flipUserClipHorizontally: flipUserClipHorizontally,
         audioMode: _AudioMode.silent,
       ),
     ];
@@ -93,9 +97,13 @@ abstract final class DuetComposer {
     String userPath,
     String outPath,
     DuetLayout layout, {
+    required bool flipUserClipHorizontally,
     required _AudioMode audioMode,
   }) {
-    final videoGraph = _videoFilter(layout);
+    final videoGraph = _videoFilter(
+      layout,
+      flipUserClipHorizontally: flipUserClipHorizontally,
+    );
     switch (audioMode) {
       case _AudioMode.originalOnly:
         return '-y -i "$originalPath" -i "$userPath" '
@@ -112,7 +120,10 @@ abstract final class DuetComposer {
     }
   }
 
-  static String _videoFilter(DuetLayout layout) {
+  static String _videoFilter(
+    DuetLayout layout, {
+    required bool flipUserClipHorizontally,
+  }) {
     const halfW = _outW ~/ 2;
     const halfH = _outH ~/ 2;
     final pipW = (_outW * DuetLayoutGeometry.pipWidthFraction).round();
@@ -121,26 +132,29 @@ abstract final class DuetComposer {
     final pipX = _outW - pipW - pipMargin;
     final pipY = _outH - pipH - pipMargin;
 
-    // Letterbox (scale decrease + pad): full frame visible, black bars — no crop.
     const padColor = 'black';
+    final userFlip = flipUserClipHorizontally ? 'hflip,' : '';
+
+    String userTo(String w, String h, String label) =>
+        '[1:v]$userFlip'
+        'scale=$w:$h:force_original_aspect_ratio=decrease,'
+        'pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[$label]';
+
     switch (layout) {
       case DuetLayout.leftRight:
         return '[0:v]scale=$halfW:$_outH:force_original_aspect_ratio=decrease,'
             'pad=$halfW:$_outH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[left];'
-            '[1:v]scale=$halfW:$_outH:force_original_aspect_ratio=decrease,'
-            'pad=$halfW:$_outH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[right];'
+            '${userTo('$halfW', '$_outH', 'right')};'
             '[left][right]hstack=inputs=2[vout]';
       case DuetLayout.topBottom:
         return '[0:v]scale=$_outW:$halfH:force_original_aspect_ratio=decrease,'
             'pad=$_outW:$halfH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[top];'
-            '[1:v]scale=$_outW:$halfH:force_original_aspect_ratio=decrease,'
-            'pad=$_outW:$halfH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[bottom];'
+            '${userTo('$_outW', '$halfH', 'bottom')};'
             '[top][bottom]vstack=inputs=2[vout]';
       case DuetLayout.pip:
         return '[0:v]scale=$_outW:$_outH:force_original_aspect_ratio=decrease,'
             'pad=$_outW:$_outH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[base];'
-            '[1:v]scale=$pipW:$pipH:force_original_aspect_ratio=decrease,'
-            'pad=$pipW:$pipH:(ow-iw)/2:(oh-ih)/2:color=$padColor,setsar=1[pip];'
+            '${userTo('$pipW', '$pipH', 'pip')};'
             '[base][pip]overlay=$pipX:$pipY[vout]';
     }
   }

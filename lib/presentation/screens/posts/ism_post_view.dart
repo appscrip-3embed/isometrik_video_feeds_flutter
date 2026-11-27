@@ -404,6 +404,14 @@ class _PostViewState extends State<IsmPostView>
     );
   }
 
+  /// After dub/duet overlays, avoid restarting audio when the user already left
+  /// the host reels tab or switched away from this feed section.
+  void _resumeScopedPlaybackIfHostVisible(PostSectionType section) {
+    if (!IsrVideoReelConfig.isHostFeedTabVisible) return;
+    _emitScopedPlayPause(section, play: true);
+    IsrVideoReelConfig.resumePlaybackIfAllowed();
+  }
+
   void _scheduleReelsBodyWhenRouteSettled() {
     if (_routeEnterListenerScheduled) return;
     _routeEnterListenerScheduled = true;
@@ -1141,8 +1149,7 @@ class _PostViewState extends State<IsmPostView>
             config: _postConfig.dubWithAudioConfig,
             customHandler: _postConfig.postCallBackConfig?.onDubWithAudio,
           );
-          _emitScopedPlayPause(tabData.postSectionType, play: true);
-          IsrVideoReelConfig.resumePlaybackIfAllowed();
+          _resumeScopedPlaybackIfHostVisible(tabData.postSectionType);
         } else if (sheetResult == MoreOptionsSheetResult.duet) {
           await DuetCaptureCoordinator.handleFromPost(
             context,
@@ -1150,8 +1157,7 @@ class _PostViewState extends State<IsmPostView>
             config: _postConfig.duetConfig,
             customHandler: _postConfig.postCallBackConfig?.onDuet,
           );
-          _emitScopedPlayPause(tabData.postSectionType, play: true);
-          IsrVideoReelConfig.resumePlaybackIfAllowed();
+          _resumeScopedPlaybackIfHostVisible(tabData.postSectionType);
         } else if (sheetResult == MoreOptionsSheetResult.download) {
           await _downloadPost(postData);
           _emitScopedPlayPause(tabData.postSectionType, play: true);

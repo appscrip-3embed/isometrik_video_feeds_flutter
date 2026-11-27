@@ -27,6 +27,13 @@ When enabled, more-options on an existing **video** reel shows **Duet** if `sett
 4. `DuetComposer` (FFmpeg, letterbox + black bars, **original audio only**) → single MP4  
 5. Existing media editor → post attributes  
 
+## Camera
+
+Front camera opens by default (selfie duet). Live preview is **not** double-mirrored
+(no UI `Transform`); platform already mirrors front preview. Front **recordings** set
+`userFrontCamera: true` so FFmpeg `hflip` matches that preview in the editor. Gallery
+clips are not flipped. Mic off — original reel audio only.
+
 ## Reuse
 
 | Piece | Reuse for |
