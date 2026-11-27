@@ -18,6 +18,9 @@ dependencies:
   dotted_border: ^3.1.0
   easy_localization: ^3.0.8
   easy_video_editor: ^0.1.3
+  # Used only by standalone duet compose (hstack / vstack / overlay).
+  # See lib/features/duet/README.md — do not use for create-post segment merge.
+  ffmpeg_kit_flutter_new_min: 3.6.8
   fl_chart: ^0.69.0
   flutter:
     sdk: flutter
@@ -53,6 +56,8 @@ dependencies:
   media_kit_video: ^2.0.1
   mime: ^2.0.0
   package_info_plus: ^9.0.0
+  path: ^1.9.0
+  path_provider: ^2.1.5
   percent_indicator: ^4.2.5
   permission_handler: ^12.0.1
   photo_manager: ^3.8.3

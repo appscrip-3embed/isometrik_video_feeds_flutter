@@ -1,6 +1,7 @@
 import 'package:ism_video_reel_player/domain/models/response/response.dart';
 import 'package:ism_video_reel_player/domain/models/sound_library_models.dart';
 import 'package:ism_video_reel_player/utils/enums.dart';
+import 'package:ism_video_reel_player/utils/timeline_media_type_util.dart';
 
 class ReelDubAudioUtil {
   ReelDubAudioUtil._();
@@ -12,17 +13,27 @@ class ReelDubAudioUtil {
 
   static bool _isVideoMedia(MediaData media) =>
       media.postType == PostType.video ||
-      (media.mediaType?.toLowerCase().contains('video') ?? false);
+      TimelineMediaTypeUtil.isVideo(media.mediaType);
 
   static String? reelVideoUrlForDub(TimeLineData post) {
     final media = post.media;
-    if (media == null || media.isEmpty) return null;
+    if (media != null && media.isNotEmpty) {
+      for (final item in media) {
+        if (!_isVideoMedia(item)) continue;
+        final url = _firstNonEmpty(item.url) ??
+            _firstNonEmpty(item.localPath) ??
+            _firstNonEmpty(item.previewUrl);
+        if (url != null) return url;
+      }
+    }
 
-    for (final item in media) {
-      if (!_isVideoMedia(item)) continue;
-      return _firstNonEmpty(item.url) ??
-          _firstNonEmpty(item.localPath) ??
-          _firstNonEmpty(item.previewUrl);
+    final previews = post.previews;
+    if (previews != null && previews.isNotEmpty) {
+      for (final item in previews) {
+        if (!TimelineMediaTypeUtil.isVideo(item.mediaType)) continue;
+        final url = _firstNonEmpty(item.url);
+        if (url != null) return url;
+      }
     }
     return null;
   }

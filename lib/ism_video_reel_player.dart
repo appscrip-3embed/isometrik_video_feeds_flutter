@@ -25,6 +25,9 @@ export 'domain/models/user_info_class.dart';
 export 'isr_feed_cache_config.dart';
 export 'isr_video_reel_config.dart';
 
+/// Standalone Instagram-style Duet (enable via [PostConfig.enableDuet]).
+export 'features/duet/duet.dart';
+
 /// Presentation exports.
 export 'presentation/presentation.dart';
 

@@ -142,6 +142,29 @@ class IsrTranslationFile {
   static String get dubNoVideoMessage => isrTr('dubNoVideoMessage');
   static String get dubExtractAudioFailedMessage =>
       isrTr('dubExtractAudioFailedMessage');
+  static String get duet => isrTr('duet');
+  static String get duetChooseLayout => isrTr('duetChooseLayout');
+  static String get duetChooseLayoutSubtitle =>
+      isrTr('duetChooseLayoutSubtitle');
+  static String get duetLockedPostMessage => isrTr('duetLockedPostMessage');
+  static String get duetNoVideoMessage => isrTr('duetNoVideoMessage');
+  static String get duetDownloadFailedMessage =>
+      isrTr('duetDownloadFailedMessage');
+  static String get duetCameraFailedMessage =>
+      isrTr('duetCameraFailedMessage');
+  static String get duetRecordFailedMessage =>
+      isrTr('duetRecordFailedMessage');
+  static String get duetGalleryFailedMessage =>
+      isrTr('duetGalleryFailedMessage');
+  static String get duetComposeFailedMessage =>
+      isrTr('duetComposeFailedMessage');
+  static String get duetPreparingTitle => isrTr('duetPreparingTitle');
+  static String get duetPreparingSubtitle => isrTr('duetPreparingSubtitle');
+  static String get duetComposingTitle => isrTr('duetComposingTitle');
+  static String get duetComposingSubtitle => isrTr('duetComposingSubtitle');
+  static String get duetTapToRecord => isrTr('duetTapToRecord');
+  static String get duetTapToStop => isrTr('duetTapToStop');
+  static String get duetUseGalleryClip => isrTr('duetUseGalleryClip');
   static String get useAudio => isrTr('useAudio');
   static String get soundPreviewUnavailable => isrTr('soundPreviewUnavailable');
   static String get soundPreviewPlayFailed => isrTr('soundPreviewPlayFailed');

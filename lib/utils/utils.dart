@@ -37,6 +37,7 @@ export 'rejected_post_resubmit_service.dart';
 export 'sound_library_feature_util.dart';
 export 'sound_mux_prewarm_cache.dart';
 export 'text_post_composer_limits.dart';
+export 'timeline_media_type_util.dart';
 export 'timeline_post_type_util.dart';
 export 'triangle_painter.dart';
 export 'utility.dart';

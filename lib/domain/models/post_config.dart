@@ -16,6 +16,10 @@ class PostConfig {
     this.showViewCount = false,
     this.enableDubWithAudio = false,
     this.dubWithAudioConfig,
+    /// Standalone Instagram-style duet from existing reels (more-options).
+    /// See `features/duet/README.md`. Off by default so hosts opt in.
+    this.enableDuet = false,
+    this.duetConfig,
     this.canDownload = false,
     this.imagePostDurationSeconds,
     this.downloadWatermark,
@@ -43,6 +47,12 @@ class PostConfig {
 
   final bool enableDubWithAudio;
   final DubWithAudioConfig? dubWithAudioConfig;
+
+  /// When true, more-options offers Duet on video reels (see `features/duet`).
+  final bool enableDuet;
+
+  /// Optional host gates / defaults for the standalone duet flow.
+  final DuetConfig? duetConfig;
 
   /// When true, viewers can download reels from the more-options sheet when
   /// `settings.download_enabled` is true (API default: true).
@@ -87,6 +97,8 @@ class PostConfig {
     bool? showViewCount,
     bool? enableDubWithAudio,
     DubWithAudioConfig? dubWithAudioConfig,
+    bool? enableDuet,
+    DuetConfig? duetConfig,
     bool? canDownload,
     int? imagePostDurationSeconds,
     ReelDownloadWatermarkConfig? downloadWatermark,
@@ -103,6 +115,8 @@ class PostConfig {
         showViewCount: showViewCount ?? this.showViewCount,
         enableDubWithAudio: enableDubWithAudio ?? this.enableDubWithAudio,
         dubWithAudioConfig: dubWithAudioConfig ?? this.dubWithAudioConfig,
+        enableDuet: enableDuet ?? this.enableDuet,
+        duetConfig: duetConfig ?? this.duetConfig,
         canDownload: canDownload ?? this.canDownload,
         imagePostDurationSeconds:
             imagePostDurationSeconds ?? this.imagePostDurationSeconds,
@@ -1198,6 +1212,7 @@ class PostCallBackConfig {
     this.onViewCountClicked,
     this.onPaidPostUnlock,
     this.onDubWithAudio,
+    this.onDuet,
     this.onUseThisSound,
     this.onTipClicked,
   });
@@ -1223,6 +1238,10 @@ class PostCallBackConfig {
   final Future<void> Function(TimeLineData postData)? onPaidPostUnlock;
 
   final Future<void> Function(TimeLineData postData)? onDubWithAudio;
+
+  /// Optional host override for Duet. When null, SDK runs
+  /// [DuetCaptureCoordinator.handleFromPost].
+  final Future<void> Function(TimeLineData postData)? onDuet;
 
   /// Tapped the audio pill on a post; lets the host app open create-post with
   /// the sound preselected. When null the SDK falls back to a built-in flow
@@ -1250,6 +1269,7 @@ class PostCallBackConfig {
     Future<void> Function(TimeLineData postData)? onViewCountClicked,
     Future<void> Function(TimeLineData postData)? onPaidPostUnlock,
     Future<void> Function(TimeLineData postData)? onDubWithAudio,
+    Future<void> Function(TimeLineData postData)? onDuet,
     Future<void> Function(TimeLineData postData, PostSoundInfo sound)?
         onUseThisSound,
     Future<void> Function(TimeLineData postData)? onTipClicked,
@@ -1270,6 +1290,7 @@ class PostCallBackConfig {
         onViewCountClicked: onViewCountClicked ?? this.onViewCountClicked,
         onPaidPostUnlock: onPaidPostUnlock ?? this.onPaidPostUnlock,
         onDubWithAudio: onDubWithAudio ?? this.onDubWithAudio,
+        onDuet: onDuet ?? this.onDuet,
         onUseThisSound: onUseThisSound ?? this.onUseThisSound,
         onTipClicked: onTipClicked ?? this.onTipClicked,
       );
