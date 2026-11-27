@@ -106,23 +106,32 @@ abstract final class DuetComposer {
     required Offset pipNormalizedOffset,
     required _AudioMode audioMode,
   }) {
-    final videoGraph = _videoFilter(
+    // Layout graph ends at [vout]; normalize to CFR before encode.
+    final layoutGraph = _videoFilter(
       layout,
       flipUserClipHorizontally: flipUserClipHorizontally,
       pipNormalizedOffset: pipNormalizedOffset,
     );
+    // Gallery / camera clips often carry microsecond timebases (e.g. 1/1000000
+    // or 15360 tbn). mpeg4 rejects denominators > 65535, which is why some
+    // gallery picks failed with "Could not create the duet video" while others
+    // worked. Force CFR 30 so the encoder gets a valid timebase.
+    // Reuse: keep fps=30 + -r 30 whenever DuetComposer stays on mpeg4 (min kit).
+    final videoGraph = '$layoutGraph;[vout]fps=30,settb=1/30[vout_cfr]';
+    // fps_mode (not legacy -vsync) — this FFmpeg kit is n8.x.
+    const videoEncode = '-r 30 -c:v mpeg4 -q:v 5 -fps_mode cfr';
     switch (audioMode) {
       case _AudioMode.originalOnly:
         return '-y -i "$originalPath" -i "$userPath" '
             '-filter_complex "$videoGraph" '
-            '-map "[vout]" -map 0:a? '
-            '-c:v mpeg4 -q:v 5 -c:a aac -b:a 128k -shortest '
+            '-map "[vout_cfr]" -map 0:a? '
+            '$videoEncode -c:a aac -b:a 128k -shortest '
             '"$outPath"';
       case _AudioMode.silent:
         return '-y -i "$originalPath" -i "$userPath" '
             '-filter_complex "$videoGraph" '
-            '-map "[vout]" -an '
-            '-c:v mpeg4 -q:v 5 -shortest '
+            '-map "[vout_cfr]" -an '
+            '$videoEncode -shortest '
             '"$outPath"';
     }
   }
