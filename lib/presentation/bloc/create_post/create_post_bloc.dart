@@ -222,7 +222,11 @@ class CreatePostBloc extends Bloc<CreatePostEvent, CreatePostState> {
       IsrVideoReelConfig.socialActionCubit
           .onPostEdited(postId: postId, postData: state.postDataModel);
     } else {
-      IsrVideoReelConfig.socialActionCubit.onPostCreated(postId: postId);
+      // Pass postData so host profile can insert at index 0 without waiting on API order.
+      IsrVideoReelConfig.socialActionCubit.onPostCreated(
+        postId: postId,
+        postData: state.postDataModel ?? _postData,
+      );
     }
     IsrVideoReelConfig.createEditPostConfig.createEditPostCallBackConfig?.onBackgroundPostOperation
         ?.call(

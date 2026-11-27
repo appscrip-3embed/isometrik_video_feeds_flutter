@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
+import 'package:ism_video_reel_player/features/duet/duet.dart';
 import 'package:ism_video_reel_player/isr_video_reel_config.dart';
 import 'package:ism_video_reel_player/presentation/bloc/posts/social_post_bloc.dart';
 import 'package:ism_video_reel_player/presentation/cubits/social_action/social_action_cubit.dart';
@@ -52,6 +53,7 @@ abstract final class ProfilePostMoreOptions {
       isDismissible: true,
       child: MoreOptionsBottomSheet(
         showDubWithAudio: _shouldOfferDubWithAudio(postData, userId, postConfig),
+        showDuet: _shouldOfferDuet(postData, postConfig),
         showDownload: ReelDownloadUtil.isPostDownloadAllowed(
           postConfig: postConfig,
           post: postData,
@@ -71,6 +73,13 @@ abstract final class ProfilePostMoreOptions {
           postData,
           config: postConfig.dubWithAudioConfig,
           customHandler: postConfig.postCallBackConfig?.onDubWithAudio,
+        );
+      case MoreOptionsSheetResult.duet:
+        await DuetCaptureCoordinator.handleFromPost(
+          context,
+          postData,
+          config: postConfig.duetConfig,
+          customHandler: postConfig.postCallBackConfig?.onDuet,
         );
       case MoreOptionsSheetResult.removeMeFromPost:
         await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -130,6 +139,13 @@ abstract final class ProfilePostMoreOptions {
           (m.mediaType?.toLowerCase().contains('video') ?? false),
     );
   }
+
+  static bool _shouldOfferDuet(TimeLineData post, PostConfig postConfig) =>
+      DuetEligibilityUtil.shouldOfferDuet(
+        post,
+        enableDuet: postConfig.enableDuet,
+        duetConfig: postConfig.duetConfig,
+      );
 
   static bool _isCurrentUserMentioned(TimeLineData post, String loggedInUserId) {
     if (loggedInUserId.isEmpty) return false;

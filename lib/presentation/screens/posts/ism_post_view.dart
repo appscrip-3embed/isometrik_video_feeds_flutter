@@ -8,6 +8,7 @@ import 'package:ism_video_reel_player/core/errors/error_handler.dart';
 import 'package:ism_video_reel_player/data/data.dart';
 import 'package:ism_video_reel_player/di/di.dart';
 import 'package:ism_video_reel_player/domain/domain.dart';
+import 'package:ism_video_reel_player/features/duet/duet.dart';
 import 'package:ism_video_reel_player/ism_video_reel_player.dart';
 import 'package:ism_video_reel_player/isr_video_reel_config.dart';
 import 'package:ism_video_reel_player/presentation/presentation.dart';
@@ -401,6 +402,14 @@ class _PostViewState extends State<IsmPostView>
         scopedPostSection: section,
       ),
     );
+  }
+
+  /// After dub/duet overlays, avoid restarting audio when the user already left
+  /// the host reels tab or switched away from this feed section.
+  void _resumeScopedPlaybackIfHostVisible(PostSectionType section) {
+    if (!IsrVideoReelConfig.isHostFeedTabVisible) return;
+    _emitScopedPlayPause(section, play: true);
+    IsrVideoReelConfig.resumePlaybackIfAllowed();
   }
 
   void _scheduleReelsBodyWhenRouteSettled() {
@@ -1128,7 +1137,11 @@ class _PostViewState extends State<IsmPostView>
           _emitScopedPlayPause(tabData.postSectionType, play: true);
           return;
         }
-        final sheetResult = await _handleMoreOptions(postData, tabData);
+        final sheetResult = await _handleMoreOptions(
+          postData,
+          tabData,
+          reelsData: reelsData,
+        );
         if (sheetResult == MoreOptionsSheetResult.dubWithAudio) {
           await DubWithAudioCaptureCoordinator.handleFromPost(
             context,
@@ -1136,8 +1149,15 @@ class _PostViewState extends State<IsmPostView>
             config: _postConfig.dubWithAudioConfig,
             customHandler: _postConfig.postCallBackConfig?.onDubWithAudio,
           );
-          _emitScopedPlayPause(tabData.postSectionType, play: true);
-          IsrVideoReelConfig.resumePlaybackIfAllowed();
+          _resumeScopedPlaybackIfHostVisible(tabData.postSectionType);
+        } else if (sheetResult == MoreOptionsSheetResult.duet) {
+          await DuetCaptureCoordinator.handleFromPost(
+            context,
+            postData,
+            config: _postConfig.duetConfig,
+            customHandler: _postConfig.postCallBackConfig?.onDuet,
+          );
+          _resumeScopedPlaybackIfHostVisible(tabData.postSectionType);
         } else if (sheetResult == MoreOptionsSheetResult.download) {
           await _downloadPost(postData);
           _emitScopedPlayPause(tabData.postSectionType, play: true);
@@ -1858,6 +1878,14 @@ class _PostViewState extends State<IsmPostView>
     );
   }
 
+  bool _shouldOfferDuet(TimeLineData post, {ReelsData? reelsData}) =>
+      DuetEligibilityUtil.shouldOfferDuet(
+        post,
+        enableDuet: _postConfig.enableDuet,
+        duetConfig: _postConfig.duetConfig,
+        reelsData: reelsData,
+      );
+
   bool _isCurrentUserMentioned(TimeLineData post) {
     if (_loggedInUserId.isEmpty) return false;
     final mentions = post.tags?.mentions;
@@ -1906,12 +1934,16 @@ class _PostViewState extends State<IsmPostView>
 
   /// Handles the more options menu for a post
   Future<dynamic> _handleMoreOptions(
-      TimeLineData postDataModel, TabDataModel tabData) async {
+    TimeLineData postDataModel,
+    TabDataModel tabData, {
+    ReelsData? reelsData,
+  }) async {
     try {
       final isOwner = postDataModel.user?.id == _loggedInUserId;
       return await _showMoreOptionsDialog(
         tabData: tabData,
         showDubWithAudio: _shouldOfferDubWithAudio(postDataModel),
+        showDuet: _shouldOfferDuet(postDataModel, reelsData: reelsData),
         showDownload: _shouldOfferDownload(postDataModel),
         showRemoveMeFromPost:
             !isOwner && _isCurrentUserMentioned(postDataModel),
@@ -2117,6 +2149,7 @@ class _PostViewState extends State<IsmPostView>
   Future<String?> _showMoreOptionsDialog({
     Future<dynamic> Function()? onReportPost,
     bool showDubWithAudio = false,
+    bool showDuet = false,
     bool showDownload = false,
     bool showRemoveMeFromPost = false,
     Future<void> Function()? onRemoveMeFromPost,
@@ -2131,6 +2164,7 @@ class _PostViewState extends State<IsmPostView>
       isDismissible: true,
       child: MoreOptionsBottomSheet(
         showDubWithAudio: showDubWithAudio,
+        showDuet: showDuet,
         showDownload: showDownload,
         showRemoveMeFromPost: showRemoveMeFromPost,
         isSelfProfile: isSelfProfile == true,
@@ -2139,6 +2173,8 @@ class _PostViewState extends State<IsmPostView>
 
     switch (sheetResult) {
       case MoreOptionsSheetResult.dubWithAudio:
+        return sheetResult;
+      case MoreOptionsSheetResult.duet:
         return sheetResult;
       case MoreOptionsSheetResult.removeMeFromPost:
         if (onRemoveMeFromPost != null) {

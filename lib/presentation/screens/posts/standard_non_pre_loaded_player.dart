@@ -189,14 +189,18 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   static const Duration _sizeWaitTimeout = Duration(milliseconds: 800);
 
-  /// Live decoders — keep low on Android (SurfaceView buffer limits / BLASTBufferQueue).
-  static int get _maxLiveControllers => Platform.isAndroid ? 2 : 4;
+  /// Live decoders — keep low on mobile (SurfaceView / MediaCodec / AVPlayer).
+  /// Reuse: must stay aligned with [ReelsFeedPrecacheCoordinator] warm window
+  /// (mobile: visible + 1 ahead ≈ 2). Android already smooth; iOS was slow with
+  /// 4 concurrent AVPlayers + custom HTTP headers on progressive MP4.
+  static int get _maxLiveControllers =>
+      (Platform.isAndroid || Platform.isIOS) ? 2 : 4;
 
   /// Insertion-ordered live controller map (url → wrapper).
   final LinkedHashMap<String, IVideoPlayerController> _liveControllers =
       LinkedHashMap<String, IVideoPlayerController>();
 
-  /// URLs in the reels warm window — evicted only after leaving the window.
+  /// URLs in the reels warm window — preferred keep, but soft-cap still wins.
   final Set<String> _warmPinnedUrls = <String>{};
 
   final Set<String> _initializingUrls = <String>{};
@@ -219,6 +223,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     _warmPinnedUrls
       ..clear()
       ..addAll(urls);
+    // Pins must not defeat the soft-cap (warm ahead + visible used to exceed 2).
+    _evictIfOverCap();
   }
 
   /// Clears warm pins and disposes pooled decoders (profile / other tabs).
@@ -250,19 +256,20 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
 
   void _evictIfOverCap({String? exceptUrl}) {
     while (_liveControllers.length > _maxLiveControllers) {
-      String? evictUrl;
-      for (final entry in _liveControllers.entries) {
-        if (entry.key == exceptUrl) continue;
-        if (_warmPinnedUrls.contains(entry.key)) continue;
-        if (FeedVideoPlayerHandoff.isControllerProtected(entry.value)) {
-          continue;
-        }
-        evictUrl = entry.key;
-        break;
-      }
+      // Pass 1: drop non-warm first. Pass 2: drop warm pins too so soft-cap
+      // always wins (avoids 3+ MediaCodec sessions during fast scroll).
+      final evictUrl = _pickEvictionUrl(
+            exceptUrl: exceptUrl,
+            allowWarmPinned: false,
+          ) ??
+          _pickEvictionUrl(
+            exceptUrl: exceptUrl,
+            allowWarmPinned: true,
+          );
       if (evictUrl == null) break;
       final victim = _liveControllers.remove(evictUrl);
       if (victim == null) continue;
+      _warmPinnedUrls.remove(evictUrl);
       try {
         if (victim is StandardVideoNonPreloadedController) {
           victim.prepareForDispose();
@@ -275,6 +282,25 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
         debugPrint('⚠️ Soft-cap eviction error for $evictUrl: $e');
       }
     }
+  }
+
+  /// Oldest (insertion-order) live URL that is safe to dispose.
+  String? _pickEvictionUrl({
+    required String? exceptUrl,
+    required bool allowWarmPinned,
+  }) {
+    for (final entry in _liveControllers.entries) {
+      if (entry.key == exceptUrl) continue;
+      if (!allowWarmPinned && _warmPinnedUrls.contains(entry.key)) continue;
+      if (FeedVideoPlayerHandoff.isControllerProtected(entry.value)) continue;
+      if (entry.value is StandardVideoNonPreloadedController) {
+        final c = entry.value as StandardVideoNonPreloadedController;
+        // Still attached to a mounted widget — do not tear down mid-frame.
+        if (c.attachCount > 0) continue;
+      }
+      return entry.key;
+    }
+    return null;
   }
 
   @override
@@ -296,7 +322,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
       toWarm.add(url);
     }
 
-    final parallel = Platform.isAndroid ? 1 : 2;
+    // One-at-a-time warm on mobile — parallel AVPlayer inits stall iOS hard.
+    final parallel = (Platform.isAndroid || Platform.isIOS) ? 1 : 2;
     for (var i = 0; i < toWarm.length; i += parallel) {
       final batch = toWarm.skip(i).take(parallel);
       await Future.wait(
@@ -469,16 +496,8 @@ class StandardVideoNonPreloadedManager implements IVideoCacheManager {
     }
 
     final isHls = url.toLowerCase().endsWith('.m3u8');
-    final headers = {
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'no-cache',
-      if (isHls)
-        'X-Playback-Session-Id':
-            DateTime.now().millisecondsSinceEpoch.toString(),
-    };
+    // iOS: empty headers for progressive MP4 — see [VideoMediaUtil.networkHttpHeaders].
+    final headers = VideoMediaUtil.networkHttpHeaders(isHls: isHls);
 
     return VideoPlayerController.networkUrl(
       Uri.parse(url),

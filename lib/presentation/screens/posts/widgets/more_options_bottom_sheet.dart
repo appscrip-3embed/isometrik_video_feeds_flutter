@@ -4,6 +4,7 @@ import 'package:ism_video_reel_player/res/res.dart';
 
 abstract final class MoreOptionsSheetResult {
   static const String dubWithAudio = 'dub_with_audio';
+  static const String duet = 'duet';
   static const String report = 'report';
   static const String edit = 'edit';
   static const String delete = 'delete';
@@ -17,6 +18,7 @@ class MoreOptionsBottomSheet extends StatefulWidget {
     super.key,
     this.onReportPost,
     this.showDubWithAudio = false,
+    this.showDuet = false,
     this.onDeletePost,
     this.onEditPost,
     this.onShowPostInsight,
@@ -28,6 +30,10 @@ class MoreOptionsBottomSheet extends StatefulWidget {
 
   final Future<void> Function()? onReportPost;
   final bool showDubWithAudio;
+
+  /// Standalone duet entry (see `features/duet`). Host opts in via
+  /// [PostConfig.enableDuet].
+  final bool showDuet;
   final Future<void> Function()? onDeletePost;
   final Future<void> Function()? onEditPost;
   final Future<void> Function()? onShowPostInsight;
@@ -59,6 +65,18 @@ class _MoreOptionsBottomSheetState extends State<MoreOptionsBottomSheet> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Duet is host-gated ([showDuet]) and available on own + others'
+              // video reels — do not bury it under !isSelfProfile only.
+              if (widget.showDuet) ...[
+                _buildOption(
+                  title: IsrTranslationFile.duet,
+                  onTap: () => Navigator.pop(
+                    context,
+                    MoreOptionsSheetResult.duet,
+                  ),
+                ),
+                Divider(height: 1, color: _dividerColor),
+              ],
               if (!widget.isSelfProfile) ...[
                 if (widget.showDubWithAudio) ...[
                   _buildOption(

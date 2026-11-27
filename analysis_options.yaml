@@ -3,6 +3,12 @@ analyzer:
     - lib/**/*.g.dart
     - lib/domain/entities/*.dart
     - lib/app/utils/strings/polyglot.dart
+    - build/**
+    - android/**
+    - ios/**
+    - windows/**
+    - macos/**
+    - linux/**
   language:
     strict-casts: true
     strict-raw-types: true

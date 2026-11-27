@@ -540,7 +540,9 @@ class MediaData {
         fileName: json.getString('fileName'),
         postType: json['postType'] is PostType
             ? json['postType'] as PostType
-            : PostType.photo,
+            : TimelineMediaTypeUtil.postTypeFromMediaType(
+                json.stringOrNull('media_type') ?? json.getString('media_type'),
+              ),
         size: json.getNum('size'),
         moderationStatus: json.stringOrNull('moderation_status') ??
             json.stringOrNull('moderationStatus') ??
@@ -620,8 +622,10 @@ class Settings {
 
     return Settings(
       commentsEnabled: json.getBool('comments_enabled'),
-      duetEnabled: json.getBool('duet_enabled'),
-      stitchEnabled: json.getBool('stitch_enabled'),
+      // Null when API omits the key — treat as allowed for host-gated Duet.
+      // Do not use getBool (defaults false) or Duet never appears.
+      duetEnabled: json.boolOrNull('duet_enabled'),
+      stitchEnabled: json.boolOrNull('stitch_enabled'),
       saveEnabled: json.getBool('save_enabled'),
       downloadEnabled: json.boolOrNull('download_enabled') ?? true,
       isPaid: normalizedIsPaid,
@@ -1399,7 +1403,7 @@ ReelsData getReelData(TimeLineData postData, {String? loggedInUserId}) =>
 
 MediaMetaData _getMediaMetaData(MediaData mediaData) {
   if (IsrAppConstants.convertHlsPostMediaToImageMedia &&
-      mediaData.mediaType == 'video' &&
+      TimelineMediaTypeUtil.isVideo(mediaData.mediaType) &&
       mediaData.url?.endsWith('.m3u8') == true) {
     return MediaMetaData(
       mediaType: 0,
@@ -1409,11 +1413,12 @@ MediaMetaData _getMediaMetaData(MediaData mediaData) {
     );
   }
 
+  final isImage = TimelineMediaTypeUtil.isImage(mediaData.mediaType);
   return MediaMetaData(
-    mediaType: mediaData.mediaType == 'image' ? 0 : 1,
+    mediaType: isImage ? 0 : 1,
     mediaUrl: mediaData.url ?? '',
     thumbnailUrl: mediaData.previewUrl ?? '',
-    durationSeconds: (mediaData.mediaType == 'image'
+    durationSeconds: (isImage
             ? PostSoundUtil.imageSoundSecondsPerSlide
             : mediaData.duration?.toInt()) ??
         PostSoundUtil.imageSoundSecondsPerSlide,

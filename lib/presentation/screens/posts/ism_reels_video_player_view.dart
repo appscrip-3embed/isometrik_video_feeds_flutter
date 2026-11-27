@@ -418,9 +418,31 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
   }
 
   void _onHostFeedTabVisibility() {
+    final hostVisible = IsrVideoReelConfig.hostFeedTabVisibleNotifier.value;
+    if (hostVisible) return;
+    if (_wasVisiblePost && widget.currentIndex.value == widget.index) {
+      _logWatchPostEvent();
+    }
+  }
+
+  void _pauseForHostTabLeave() {
     if (IsrVideoReelConfig.hostFeedTabVisibleNotifier.value) return;
-    if (!_wasVisiblePost || widget.currentIndex.value != widget.index) return;
-    _logWatchPostEvent();
+    if (!_isCurrentReel) {
+      unawaited(_stopImageSound());
+      return;
+    }
+    _pauseImageProgress();
+    unawaited(_stopImageSound());
+    unawaited(_resetHoldPlaybackSpeed());
+    if (_hasMultipleMedia) {
+      for (final entry in _videoPlayerKeys.entries) {
+        VideoPlayerWidget.of(entry.value)?.pauseForLifecycle();
+      }
+    } else {
+      final key = _getCurrentVideoPlayerKey();
+      VideoPlayerWidget.of(key)?.pause();
+    }
+    _isPlaybackBlocked = true;
   }
 
   void _onCurrentIndexChanged() {
@@ -472,6 +494,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     VideoMuteController.notifier.addListener(_onGlobalMuteChanged);
     IsrVideoReelConfig.hostFeedTabVisibleNotifier
         .addListener(_onHostFeedTabVisibility);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .addListener(_pauseForHostTabLeave);
     debugPrint(
         'IsmReelsVideoPlayerView: initState index: ${widget.index}, visibleIndex: ${widget.currentIndex.value}, tabType: ${widget.postSectionType}');
     super.initState();
@@ -997,6 +1021,8 @@ class _IsmReelsVideoPlayerViewState extends State<IsmReelsVideoPlayerView>
     VideoMuteController.notifier.removeListener(_onGlobalMuteChanged);
     IsrVideoReelConfig.hostFeedTabVisibleNotifier
         .removeListener(_onHostFeedTabVisibility);
+    IsrVideoReelConfig.hostFeedTabVisibleNotifier
+        .removeListener(_pauseForHostTabLeave);
     IsrImageSoundRegistry.releaseOwner(this);
     _tapGestureRecognizer?.dispose();
     _pageController?.dispose();

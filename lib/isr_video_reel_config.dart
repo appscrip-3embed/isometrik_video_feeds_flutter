@@ -488,10 +488,15 @@ class IsrVideoReelConfig {
   }
 
   /// Pair with [suppressPlayback]; resumes only if the host tab is still reels.
-  static void releasePlaybackSuppression() {
+  ///
+  /// Pass [resume] `false` when the host leaves the reels shell tab (bottom nav)
+  /// so overlay teardown does not briefly restart offstage feed audio.
+  static void releasePlaybackSuppression({bool resume = true}) {
     if (_playbackSuppressionCount > 0) {
       _playbackSuppressionCount--;
     }
+    if (!resume) return;
+    if (!isHostFeedTabVisible || _overlayReelsPlayerCount > 0) return;
     _emitPlaybackResume();
   }
 
